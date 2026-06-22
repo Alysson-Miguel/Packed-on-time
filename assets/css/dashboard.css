@@ -58,6 +58,10 @@ tr:hover td{background:var(--surface2)}
 .zona-row .zv{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-dim)}
 .zona-row .zbar{height:5px;border-radius:3px;background:var(--surface2);overflow:hidden;margin-top:6px}
 .zona-row .zbar span{display:block;height:100%;background:var(--accent)}
+.insights-list{list-style:none;display:flex;flex-direction:column;gap:10px}
+.insights-list li{font-size:13px;color:var(--text-dim);line-height:1.5;padding-left:20px;position:relative}
+.insights-list li::before{content:'→';position:absolute;left:0;color:var(--accent);font-weight:700}
+.insights-list li.warn::before{content:'⚠';color:var(--red)}
 .diag-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
 .diag-card{background:#fff;border:1px solid var(--border);border-radius:8px;padding:16px;text-align:center}
 .diag-card .dv{font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;color:var(--text)}

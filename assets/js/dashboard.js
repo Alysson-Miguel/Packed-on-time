@@ -154,6 +154,7 @@ function clearFilters() {
 
 function renderAll() {
   renderKPIs();
+  renderInsights();
   renderDiagnostico();
   renderTurnoChart();
   renderZonaRanking();
@@ -162,10 +163,79 @@ function renderAll() {
   renderDrilldown();
 }
 
+// ---------- Insights Automáticos ----------
+
+function renderInsights() {
+  const container = document.getElementById('insightsList');
+  const total = filteredData.length;
+  if (!total) {
+    container.innerHTML = '<li>Sem dados para os filtros selecionados.</li>';
+    return;
+  }
+
+  const items = [];
+
+  // 1. Processo que mais consome tempo (reaproveita a mesma classificação do Diagnóstico)
+  const groups = { 'Aguardando Stage': { count: 0, sum: 0 }, 'Stage': { count: 0, sum: 0 }, 'Packing': { count: 0, sum: 0 } };
+  filteredData.forEach(r => {
+    const b = classifyBottleneck(r);
+    if (b) { groups[b.label].count++; groups[b.label].sum += b.value; }
+  });
+  const stats = Object.entries(groups).map(([label, g]) => ({ label, count: g.count, avg: g.count ? g.sum / g.count : null }));
+  const topProc = stats.reduce((max, s) => (s.count > max.count ? s : max), stats[0]);
+  if (topProc.count) {
+    items.push(`<strong>${fmtPct((topProc.count / total) * 100)}</strong> dos pacotes (${topProc.count.toLocaleString('pt-BR')} de ${total.toLocaleString('pt-BR')}) tiveram seu maior tempo perdido no processo <strong>${topProc.label}</strong>, com média de ${fmtDuration(topProc.avg)} nessa etapa.`);
+  }
+
+  // 2. Concentração por zona + alerta de qualidade de dado
+  const zonaCount = {};
+  filteredData.forEach(r => { zonaCount[r.zona] = (zonaCount[r.zona] || 0) + 1; });
+  const zonaRanked = Object.entries(zonaCount).sort((a, b) => b[1] - a[1]);
+  if (zonaRanked.length) {
+    const [topZona, topZonaCount] = zonaRanked[0];
+    items.push(`A zona <strong>${escapeHtml(topZona)}</strong> concentra <strong>${fmtPct((topZonaCount / total) * 100)}</strong> dos pacotes (${topZonaCount.toLocaleString('pt-BR')}).`);
+  }
+  const naoInformado = zonaCount['Não informado'] || 0;
+  if (naoInformado / total > 0.05) {
+    items.push({ warn: true, html: `<strong>${fmtPct((naoInformado / total) * 100)}</strong> dos pacotes não têm zona registrada — isso limita a análise por zona e pode indicar falha de captura de dado.` });
+  }
+
+  // 3. Concentração por turno
+  const turnoCount = {};
+  filteredData.forEach(r => { turnoCount[r.turno] = (turnoCount[r.turno] || 0) + 1; });
+  const turnoRanked = Object.entries(turnoCount).sort((a, b) => b[1] - a[1]);
+  if (turnoRanked.length) {
+    const [topTurno, topTurnoCount] = turnoRanked[0];
+    items.push(`O <strong>${escapeHtml(topTurno)}</strong> concentra a maior parte dos atrasos: <strong>${fmtPct((topTurnoCount / total) * 100)}</strong> (${topTurnoCount.toLocaleString('pt-BR')} pacotes).`);
+  }
+
+  // 4. Outlier de atraso (pior caso muito acima da média)
+  const atrasos = filteredData.map(r => r.atrasoH).filter(v => v !== null);
+  if (atrasos.length) {
+    const avgAtraso = avg(atrasos);
+    const maxAtraso = Math.max(...atrasos);
+    if (avgAtraso !== null && maxAtraso > avgAtraso * 3 && maxAtraso > 24) {
+      items.push({ warn: true, html: `O pior caso individual chegou a <strong>${fmtDuration(maxAtraso)}</strong> de atraso — bem acima da média (${fmtDuration(avgAtraso)}). Parece ser uma exceção isolada, não o padrão do período.` });
+    }
+  }
+
+  container.innerHTML = items.map(i => {
+    const isObj = typeof i === 'object';
+    return `<li${isObj && i.warn ? ' class="warn"' : ''}>${isObj ? i.html : i}</li>`;
+  }).join('');
+}
+
 // ---------- KPIs ----------
 
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null; }
-function fmtH(n) { return n === null || n === undefined ? '—' : n.toFixed(1) + 'h'; }
+// Recebe uma duração em horas e escolhe a unidade mais legível: min (<1h), h (<24h) ou dias (>=24h).
+function fmtDuration(hours) {
+  if (hours === null || hours === undefined || isNaN(hours)) return '—';
+  const abs = Math.abs(hours);
+  if (abs < 1) return Math.round(hours * 60) + 'min';
+  if (abs < 24) return hours.toFixed(1) + 'h';
+  return (hours / 24).toFixed(1) + 'd';
+}
 function fmtPct(n) { return n === null || n === undefined ? '—' : n.toFixed(1) + '%'; }
 
 function renderKPIs() {
@@ -175,9 +245,9 @@ function renderKPIs() {
   const avgCycle = avg(filteredData.map(r => r.totalCycle).filter(v => v !== null));
 
   document.getElementById('kpiTotal').textContent = filteredData.length.toLocaleString('pt-BR');
-  document.getElementById('kpiAvgDelay').textContent = fmtH(avgDelay);
-  document.getElementById('kpiMaxDelay').textContent = fmtH(maxDelay);
-  document.getElementById('kpiAvgCycle').textContent = fmtH(avgCycle);
+  document.getElementById('kpiAvgDelay').textContent = fmtDuration(avgDelay);
+  document.getElementById('kpiMaxDelay').textContent = fmtDuration(maxDelay);
+  document.getElementById('kpiAvgCycle').textContent = fmtDuration(avgCycle);
 }
 
 // ---------- Diagnóstico do Processo ----------
@@ -229,7 +299,7 @@ function renderDiagnostico() {
 function setDiagCard(valueId, subId, stat, total) {
   document.getElementById(valueId).textContent = total ? fmtPct(stat.pct) : '—';
   document.getElementById(subId).textContent = stat.count
-    ? `${stat.count.toLocaleString('pt-BR')} de ${total.toLocaleString('pt-BR')} pacotes · média ${fmtH(stat.avg)} nesse processo`
+    ? `${stat.count.toLocaleString('pt-BR')} de ${total.toLocaleString('pt-BR')} pacotes · média ${fmtDuration(stat.avg)} nesse processo`
     : 'Nenhum pacote';
 }
 
@@ -279,7 +349,7 @@ function renderZonaRanking() {
         <div class="zbar"><span style="width:${(z.count / maxCount) * 100}%"></span></div>
       </div>
       <div class="zv">${z.count.toLocaleString('pt-BR')} pacotes</div>
-      <div class="zv">${fmtH(z.avgHoras)} médio em zona</div>
+      <div class="zv">${fmtDuration(z.avgHoras)} médio em zona</div>
     </div>
   `).join('');
 }
@@ -318,13 +388,13 @@ function renderDrilldown() {
       <td>${escapeHtml(r.br || '—')}</td>
       <td>${turnoBadge(r.turno)}</td>
       <td class="td-num">${fmtDate(r.received)}</td>
-      <td class="td-num">${fmtH(r.esperaStage)}</td>
-      <td class="td-num">${fmtH(r.horasStage)}</td>
+      <td class="td-num">${fmtDuration(r.esperaStage)}</td>
+      <td class="td-num">${fmtDuration(r.horasStage)}</td>
       <td class="td-num">${fmtDate(r.detach)}</td>
-      <td class="td-num">${r.minPacking !== null ? r.minPacking + 'min' : '-'}</td>
+      <td class="td-num">${fmtDuration(r.minPacking !== null ? r.minPacking / 60 : null)}</td>
       <td class="td-num">${fmtDate(r.packed)}</td>
       <td class="td-num">${fmtDate(r.cpt)}</td>
-      <td class="td-num td-accent">${r.atrasoH !== null ? r.atrasoH.toFixed(1) + 'h' : '-'}</td>
+      <td class="td-num td-accent">${fmtDuration(r.atrasoH)}</td>
       <td>${escapeHtml(r.zona)}</td>
     </tr>
   `).join('');
