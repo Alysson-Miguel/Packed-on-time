@@ -4,10 +4,10 @@ if (typeof ChartDataLabels !== 'undefined') Chart.register(ChartDataLabels);
 
 // ---------- Fetch ----------
 
-async function fetchData() {
+async function fetchData(force) {
   const btn = document.getElementById('btnRefresh');
-  btn.disabled = true; btn.textContent = '⟳ Buscando...';
-  showLoader('Carregando dados...');
+  btn.disabled = true; btn.textContent = force ? '⟳ Buscando na planilha...' : '⟳ Buscando...';
+  showLoader(force ? 'Buscando dados direto da planilha (pode levar até 30s)...' : 'Carregando dados...');
   try {
     let rows;
     let lastUpdate;
@@ -18,14 +18,14 @@ async function fetchData() {
       document.getElementById('liveLabel').textContent = 'Mock';
       setStatus('load', 'Usando dados de exemplo (mock). Defina USE_MOCK=false em config.js para conectar à planilha real.');
     } else {
-      const response = await fetch('/api/sheet-data');
+      const response = await fetch(force ? '/api/sheet-data?force=1' : '/api/sheet-data');
       const payload = await response.json();
       if (payload.error) throw new Error(payload.error);
       lastUpdate = payload.lastUpdate;
       rows = arraysToRows(payload.headers || [], payload.rows || []);
       document.getElementById('liveDot').classList.remove('mock');
       document.getElementById('liveLabel').textContent = 'Live';
-      setStatus(payload.notice ? 'load' : 'ok', payload.notice || `Conectado à planilha. ${rows.length} registros carregados (últimos dias em cache).`);
+      setStatus(payload.notice ? 'load' : 'ok', payload.notice || `Conectado à planilha. ${rows.length} registros carregados (${force ? 'busca direta agora' : 'últimos dias em cache'}).`);
     }
     document.getElementById('lastUpdate').textContent = lastUpdate ? new Date(lastUpdate).toLocaleString('pt-BR') : '—';
     rawData = rows.map(normalizeRow);
@@ -68,18 +68,20 @@ function normalizeRow(r) {
   const received = parseDate(r.received_datetime);
   const packed = parseDate(r.packed_datetime);
   const cpt = parseDate(r.cpt_planejado);
+  const stagingIn = parseDate(r.staging_in_datetime);
   return {
     br: r.br,
     hub: r.hub_destino,
     received, packed, cpt,
     turno: r.turno_ofensor || 'Não informado',
     zona: (r.grupo_stage_inbound || 'Não informado').trim() || 'Não informado',
-    stagingIn: parseDate(r.staging_in_datetime),
+    stagingIn,
     detach: parseDate(r.detach_inbound_datetime),
     minPacking: toNumber(r.min_no_packing),
     horasStage: toNumber(r.horas_no_stage_inbound),
     totalCycle: toNumber(r.total_received_ate_packed_h),
-    atrasoH: (packed && cpt) ? (packed.getTime() - cpt.getTime()) / 3600000 : null
+    atrasoH: (packed && cpt) ? (packed.getTime() - cpt.getTime()) / 3600000 : null,
+    esperaStage: (received && stagingIn) ? (stagingIn.getTime() - received.getTime()) / 3600000 : null
   };
 }
 
@@ -90,6 +92,26 @@ function populateFilterOptions() {
   const zonas = [...new Set(rawData.map(r => r.zona))].sort();
   fillSelect('filterTurno', turnos);
   fillSelect('filterZona', zonas);
+  updateDateBounds();
+}
+
+function toDateStr(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function updateDateBounds() {
+  const dates = rawData.map(r => r.received).filter(d => d);
+  const ini = document.getElementById('filterDataIni');
+  const fim = document.getElementById('filterDataFim');
+  if (!dates.length) {
+    ini.removeAttribute('min'); ini.removeAttribute('max');
+    fim.removeAttribute('min'); fim.removeAttribute('max');
+    return;
+  }
+  const minStr = toDateStr(new Date(Math.min(...dates)));
+  const maxStr = toDateStr(new Date(Math.max(...dates)));
+  ini.min = fim.min = minStr;
+  ini.max = fim.max = maxStr;
 }
 
 function fillSelect(id, values) {
@@ -110,8 +132,7 @@ function applyFilters() {
     if (turno && r.turno !== turno) return false;
     if (zona && r.zona !== zona) return false;
     if (r.received) {
-      const d = r.received;
-      const dStr = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      const dStr = toDateStr(r.received);
       if (dateFrom && dStr < dateFrom) return false;
       if (dateTo && dStr > dateTo) return false;
     } else if (dateFrom || dateTo) {
@@ -161,32 +182,55 @@ function renderKPIs() {
 
 // ---------- Diagnóstico do Processo ----------
 
-function renderDiagnostico() {
-  const avgStage = avg(filteredData.map(r => r.horasStage).filter(v => v !== null));
-  const avgPackingH = avg(filteredData.map(r => r.minPacking).filter(v => v !== null).map(v => v / 60));
-  const avgCycle = avg(filteredData.map(r => r.totalCycle).filter(v => v !== null));
-  const avgOutros = (avgCycle !== null && avgStage !== null && avgPackingH !== null) ? Math.max(avgCycle - avgStage - avgPackingH, 0) : null;
+// Para cada pacote, aponta qual dos 3 processos consumiu mais tempo (o "gargalo" daquele pacote).
+function classifyBottleneck(r) {
+  const procs = [
+    { label: 'Aguardando Stage', value: r.esperaStage },
+    { label: 'Stage', value: r.horasStage },
+    { label: 'Packing', value: r.minPacking !== null ? r.minPacking / 60 : null }
+  ].filter(p => p.value !== null && !isNaN(p.value));
+  if (!procs.length) return null;
+  return procs.reduce((max, p) => (p.value > max.value ? p : max), procs[0]);
+}
 
-  document.getElementById('diagStage').textContent = fmtH(avgStage);
-  document.getElementById('diagStagePct').textContent = avgCycle ? fmtPct((avgStage / avgCycle) * 100) + ' do ciclo' : '—';
-  document.getElementById('diagPacking').textContent = fmtH(avgPackingH);
-  document.getElementById('diagPackingPct').textContent = avgCycle ? fmtPct((avgPackingH / avgCycle) * 100) + ' do ciclo' : '—';
-  document.getElementById('diagCycle').textContent = fmtH(avgCycle);
-  document.getElementById('diagCyclePct').textContent = '100% do ciclo';
+function renderDiagnostico() {
+  const total = filteredData.length;
+  const groups = { 'Aguardando Stage': { count: 0, sum: 0 }, 'Stage': { count: 0, sum: 0 }, 'Packing': { count: 0, sum: 0 } };
+
+  filteredData.forEach(r => {
+    const b = classifyBottleneck(r);
+    if (!b) return;
+    groups[b.label].count++;
+    groups[b.label].sum += b.value;
+  });
+
+  const stats = Object.entries(groups).map(([label, g]) => ({
+    label,
+    count: g.count,
+    avg: g.count ? g.sum / g.count : null,
+    pct: total ? (g.count / total) * 100 : 0
+  }));
+
+  setDiagCard('diagEspera', 'diagEsperaSub', stats[0], total);
+  setDiagCard('diagStage', 'diagStageSub', stats[1], total);
+  setDiagCard('diagPacking', 'diagPackingSub', stats[2], total);
 
   destroyChart('chartDiagnostico');
   charts.chartDiagnostico = new Chart(document.getElementById('chartDiagnostico'), {
     type: 'bar',
     data: {
-      labels: ['Tempo Médio do Ciclo'],
-      datasets: [
-        { label: 'Stage Inbound', data: [avgStage || 0], backgroundColor: '#ea580c', borderWidth: 0 },
-        { label: 'Packing', data: [avgPackingH || 0], backgroundColor: '#1e293b', borderWidth: 0 },
-        { label: 'Outros / Não Mapeado', data: [avgOutros || 0], backgroundColor: '#cbd5e1', borderWidth: 0 }
-      ]
+      labels: stats.map(s => s.label),
+      datasets: [{ label: '% dos pacotes', data: stats.map(s => s.pct), backgroundColor: ['#cbd5e1', '#ea580c', '#1e293b'], borderWidth: 0, borderRadius: 4 }]
     },
-    options: { ...chartOpts(), indexAxis: 'y', scales: { x: { stacked: true, grid: { color: '#f1f5f9' }, ticks: { color: '#64748b', font: { size: 10, family: 'JetBrains Mono' } } }, y: { stacked: true, grid: { display: false }, ticks: { color: '#64748b', font: { size: 10, family: 'JetBrains Mono' } } } } }
+    options: { ...chartOpts(), indexAxis: 'y', scales: { x: { max: 100, grid: { color: '#f1f5f9' }, ticks: { color: '#64748b', font: { size: 10, family: 'JetBrains Mono' } } }, y: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10, family: 'JetBrains Mono' } } } } }
   });
+}
+
+function setDiagCard(valueId, subId, stat, total) {
+  document.getElementById(valueId).textContent = total ? fmtPct(stat.pct) : '—';
+  document.getElementById(subId).textContent = stat.count
+    ? `${stat.count.toLocaleString('pt-BR')} de ${total.toLocaleString('pt-BR')} pacotes · média ${fmtH(stat.avg)} nesse processo`
+    : 'Nenhum pacote';
 }
 
 // ---------- Por Turno ----------
@@ -265,7 +309,7 @@ function renderDrilldown() {
   const tbody = document.getElementById('drilldownBody');
 
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px">Nenhum registro encontrado.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--text-muted);padding:24px">Nenhum registro encontrado.</td></tr>';
     return;
   }
 
@@ -274,13 +318,14 @@ function renderDrilldown() {
       <td>${escapeHtml(r.br || '—')}</td>
       <td>${turnoBadge(r.turno)}</td>
       <td class="td-num">${fmtDate(r.received)}</td>
+      <td class="td-num">${fmtH(r.esperaStage)}</td>
+      <td class="td-num">${fmtH(r.horasStage)}</td>
+      <td class="td-num">${fmtDate(r.detach)}</td>
+      <td class="td-num">${r.minPacking !== null ? r.minPacking + 'min' : '-'}</td>
       <td class="td-num">${fmtDate(r.packed)}</td>
       <td class="td-num">${fmtDate(r.cpt)}</td>
       <td class="td-num td-accent">${r.atrasoH !== null ? r.atrasoH.toFixed(1) + 'h' : '-'}</td>
       <td>${escapeHtml(r.zona)}</td>
-      <td class="td-num">${r.horasStage !== null ? r.horasStage.toFixed(1) + 'h' : '-'}</td>
-      <td class="td-num">${r.minPacking !== null ? r.minPacking + 'min' : '-'}</td>
-      <td class="td-num">${r.detach ? fmtDate(r.detach) : '-'}</td>
     </tr>
   `).join('');
 }

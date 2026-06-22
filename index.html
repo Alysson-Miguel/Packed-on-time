@@ -47,7 +47,7 @@
     <select id="filterZona" onchange="applyFilters()"><option value="">Todas</option></select>
   </div>
   <button class="btn-config" onclick="clearFilters()">✕ Limpar</button>
-  <button class="btn-refresh" id="btnRefresh" onclick="fetchData()">⟳ Atualizar</button>
+  <button class="btn-refresh" id="btnRefresh" onclick="fetchData(true)">⟳ Atualizar</button>
 </div>
 
 <div class="main">
@@ -64,13 +64,13 @@
 
   <div class="section-title">Diagnóstico do Processo — Onde o Tempo é Consumido</div>
   <div class="diag-grid">
-    <div class="diag-card"><div class="dv" id="diagStage">—</div><div class="dl">Tempo em Stage Inbound</div><div class="dp" id="diagStagePct">—</div></div>
-    <div class="diag-card"><div class="dv" id="diagPacking">—</div><div class="dl">Tempo em Packing</div><div class="dp" id="diagPackingPct">—</div></div>
-    <div class="diag-card"><div class="dv" id="diagCycle">—</div><div class="dl">Tempo Total de Ciclo</div><div class="dp" id="diagCyclePct">—</div></div>
+    <div class="diag-card"><div class="dv" id="diagEspera">—</div><div class="dl">Aguardando Stage</div><div class="dp" id="diagEsperaSub">—</div></div>
+    <div class="diag-card"><div class="dv" id="diagStage">—</div><div class="dl">Stage</div><div class="dp" id="diagStageSub">—</div></div>
+    <div class="diag-card"><div class="dv" id="diagPacking">—</div><div class="dl">Packing</div><div class="dp" id="diagPackingSub">—</div></div>
   </div>
   <div class="charts-row" style="margin-top:16px">
     <div class="chart-card full">
-      <div class="chart-header"><span class="chart-title">Composição do Tempo de Ciclo</span><span class="chart-badge">Diagnóstico</span></div>
+      <div class="chart-header"><span class="chart-title">Processo Predominante no Atraso (% dos pacotes)</span><span class="chart-badge">Diagnóstico</span></div>
       <div class="chart-canvas" style="height:140px"><canvas id="chartDiagnostico"></canvas></div>
     </div>
   </div>
@@ -109,8 +109,8 @@
     </div>
     <div style="overflow-x:auto">
       <table>
-        <thead><tr><th>BR</th><th>Turno</th><th>Recebido</th><th>Packed</th><th>CPT Planejado</th><th>Atraso (h)</th><th>Zona</th><th>H. Stage</th><th>Min. Packing</th><th>Detach</th></tr></thead>
-        <tbody id="drilldownBody"><tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:24px">Aguardando dados...</td></tr></tbody>
+        <thead><tr><th>BR</th><th>Turno</th><th>Recebido</th><th>Aguardando Stage</th><th>Stage</th><th>Detach</th><th>Packing</th><th>Packed</th><th>CPT Planejado</th><th>Atraso (h)</th><th>Zona</th></tr></thead>
+        <tbody id="drilldownBody"><tr><td colspan="11" style="text-align:center;color:var(--text-muted);padding:24px">Aguardando dados...</td></tr></tbody>
       </table>
     </div>
   </div>

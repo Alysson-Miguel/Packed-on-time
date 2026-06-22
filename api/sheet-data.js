@@ -1,11 +1,16 @@
-const { list } = require('@vercel/blob');
-
-const SNAPSHOT_KEY = 'packed-on-time-snapshot.json';
+const { get } = require('@vercel/blob');
+const { fetchAndCacheSnapshot, SNAPSHOT_KEY } = require('./_lib/sheet');
 
 module.exports = async (req, res) => {
   try {
-    const { blobs } = await list({ prefix: SNAPSHOT_KEY, limit: 1 });
-    if (!blobs.length) {
+    if (req.query.force) {
+      const { snapshot } = await fetchAndCacheSnapshot();
+      res.status(200).json(snapshot);
+      return;
+    }
+
+    const result = await get(SNAPSHOT_KEY, { access: 'private', useCache: false });
+    if (!result) {
       res.status(200).json({
         lastUpdate: null,
         headers: [],
@@ -15,10 +20,8 @@ module.exports = async (req, res) => {
       return;
     }
 
-    const response = await fetch(blobs[0].url, { cache: 'no-store' });
-    if (!response.ok) throw new Error(`Falha ao ler snapshot (HTTP ${response.status}).`);
-    const data = await response.json();
-    res.status(200).json(data);
+    const text = await new Response(result.stream).text();
+    res.status(200).json(JSON.parse(text));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
