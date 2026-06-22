@@ -1,0 +1,71 @@
+# 📦 KPI: Packed On Time — Contexto do Projeto
+
+## Objetivo
+Painel visual para apresentação do KPI **Packed On Time** aos Gestores, com uso diário para investigação e análise de performance operacional.
+
+---
+
+## Estrutura da Base de Dados
+
+| Campo | Uso | Descrição |
+|---|---|---|
+| `br` | ✅ Ativo | Identificação única do pacote |
+| `hub_destino` | ⏸️ Ignorado | Hub de destino (não considerado por ora) |
+| `received_datetime` | ✅ **Chave** | Data/hora de recebimento do pacote — base para todos os cálculos |
+| `packed_datetime` | ✅ **Chave** | Data/hora em que o pacote finalizou o processo de Packed |
+| `cpt_planejado` | ✅ **Chave** | Data/hora prevista para o Packed — define se está On Time ou não |
+| `turno_ofensor` | ✅ Ativo | Turno que recebeu o pacote e não deu o Packed a tempo |
+| `OOT` | ❌ Ignorado | Ignorado por performance |
+| `atraso_min` | ❌ Ignorado | Ignorado por performance |
+| `atraso_h` | ❌ Ignorado | Ignorado por performance |
+| `zona_stage_inbound` | ❌ Ignorado | Ignorado por performance (por enquanto) |
+| `grupo_stage_inbound` | ✅ **Análise de Zona** | Define qual zona mais ofende o indicador — exibir quantidade e média de tempo |
+| `staging_in_datetime` | ✅ Ativo | Hora de entrada na `grupo_stage_inbound` |
+| `detach_inbound_datetime` | ✅ Ativo | Hora de saída do `grupo_stage_inbound` (exibir `-` quando ausente) |
+| `min_no_packing` | ✅ **Importante** | Tempo em processo de Packing — essencial para análise |
+| `min_no_stage_inbound` | ❌ Ignorado | Ignorado por performance |
+| `horas_no_stage_inbound` | ✅ **Importante** | Tempo que o pacote ficou na zona de Stage Inbound |
+| `total_received_ate_packed_h` | ✅ **Importante** | Tempo total do ciclo: `received_datetime` → `packed_datetime` |
+| `passou_por_stage` | ❌ Ignorado | Ignorado por performance |
+
+---
+
+## Campos Ativos — Resumo Rápido
+
+### 🔑 Campos-Chave (definem o KPI)
+- `received_datetime` → ponto de partida do ciclo
+- `packed_datetime` → conclusão do processo
+- `cpt_planejado` → meta/prazo do Packed
+
+> **Lógica do KPI:** Pacote é **On Time** quando `packed_datetime <= cpt_planejado`
+
+### 📊 Campos de Análise
+- `grupo_stage_inbound` → identificar zonas ofensoras (quantidade + média de tempo)
+- `staging_in_datetime` / `detach_inbound_datetime` → permanência na zona
+- `horas_no_stage_inbound` → tempo de espera na zona
+- `min_no_packing` → tempo em processo de Packing
+- `total_received_ate_packed_h` → tempo total do ciclo completo
+
+### 🚨 Campos de Investigação
+- `turno_ofensor` → qual turno gerou o atraso
+- `br` → rastreabilidade individual do pacote
+
+---
+
+## Visões Planejadas para o Painel
+
+1. **KPI Geral** — % Packed On Time (volume total On Time vs Total)
+2. **Por Turno** — `turno_ofensor` → quais turnos mais geram atraso
+3. **Por Zona** — `grupo_stage_inbound` → zonas com mais ocorrências e maior tempo médio
+4. **Tempo de Ciclo** — distribuição do `total_received_ate_packed_h`
+5. **Tempo no Packing** — análise do `min_no_packing`
+6. **Tempo na Zona** — análise do `horas_no_stage_inbound`
+7. **Drill-down por Pacote** — consulta individual via `br`
+
+---
+
+## Próximos Passos
+- [ ] Receber/carregar a base de dados
+- [ ] Construir o painel visual interativo
+- [ ] Definir período padrão de visualização (dia/semana/mês)
+- [ ] Validar lógica do KPI com o usuário
