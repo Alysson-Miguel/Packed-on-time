@@ -34,20 +34,20 @@
 
 <div class="filters-bar">
   <span class="filter-label">Filtros:</span>
-  <div class="filter-group"><span class="filter-label">Recebido de</span>
-    <input type="date" id="filterDataIni" onchange="applyFilters()">
+  <div class="filter-group"><span class="filter-label">Packed de</span>
+    <input type="date" id="filterDataIni" onchange="onDateFilterChange()">
   </div>
   <div class="filter-group"><span class="filter-label">até</span>
-    <input type="date" id="filterDataFim" onchange="applyFilters()">
+    <input type="date" id="filterDataFim" onchange="onDateFilterChange()">
   </div>
   <div class="filter-group"><span class="filter-label">Turno</span>
-    <select id="filterTurno" onchange="applyFilters()"><option value="">Todos</option></select>
+    <select id="filterTurno" onchange="onCategoryFilterChange()"><option value="">Todos</option></select>
   </div>
   <div class="filter-group"><span class="filter-label">Zona</span>
-    <select id="filterZona" onchange="applyFilters()"><option value="">Todas</option></select>
+    <select id="filterZona" onchange="onCategoryFilterChange()"><option value="">Todas</option></select>
   </div>
   <button class="btn-config" onclick="clearFilters()">✕ Limpar</button>
-  <button class="btn-refresh" id="btnRefresh" onclick="fetchData(true)">⟳ Atualizar</button>
+  <button class="btn-refresh" id="btnRefresh" onclick="refreshData()">⟳ Atualizar</button>
 </div>
 
 <div class="main">
@@ -83,14 +83,14 @@
   <div class="section-title">Por Turno</div>
   <div class="charts-row">
     <div class="chart-card full">
-      <div class="chart-header"><span class="chart-title">Pacotes Atrasados por Turno</span><span class="chart-badge">Turno Ofensor</span></div>
+      <div class="chart-header"><span class="chart-title">Pacotes Atrasados por Turno</span><span class="chart-badge">Clique na barra p/ mapa de calor</span></div>
       <div class="chart-canvas"><canvas id="chartTurno"></canvas></div>
     </div>
   </div>
 
   <div class="section-title">Por Zona — Ranking de Ofensores</div>
   <div class="table-card">
-    <div class="table-header"><span class="chart-title">Zonas (grupo_stage_inbound) por volume e tempo médio</span></div>
+    <div class="table-header"><span class="chart-title">Zonas (grupo_stage_inbound) por volume e tempo médio</span><span class="chart-badge">Clique na zona p/ mapa de calor</span></div>
     <div id="zonaRanking" style="padding:16px" class="zona-ranking"></div>
   </div>
 
@@ -110,16 +110,29 @@
   <div class="table-card">
     <div class="table-header">
       <span class="chart-title">Consulta individual</span>
-      <input type="text" id="searchBr" placeholder="Buscar por BR..." oninput="renderDrilldown()">
+      <input type="text" id="searchBr" placeholder="Buscar por TO Number..." oninput="renderDrilldown()">
     </div>
     <div style="overflow-x:auto">
       <table>
-        <thead><tr><th>BR</th><th>Turno</th><th>Recebido</th><th>Aguardando Stage</th><th>Stage</th><th>Detach</th><th>Packing</th><th>Packed</th><th>CPT Planejado</th><th>Atraso (h)</th><th>Zona</th></tr></thead>
-        <tbody id="drilldownBody"><tr><td colspan="11" style="text-align:center;color:var(--text-muted);padding:24px">Aguardando dados...</td></tr></tbody>
+        <thead><tr><th>TO Number</th><th>BR</th><th>Turno</th><th>Recebido</th><th>Aguardando Stage</th><th>Stage</th><th>Detach</th><th>Packing</th><th>Packed</th><th>CPT Planejado</th><th>Atraso (h)</th><th>Zona</th></tr></thead>
+        <tbody id="drilldownBody"><tr><td colspan="12" style="text-align:center;color:var(--text-muted);padding:24px">Aguardando dados...</td></tr></tbody>
       </table>
     </div>
   </div>
 
+</div>
+
+<div class="modal-overlay" id="heatmapModal" onclick="if(event.target===this) closeHeatmap()">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div>
+        <div class="chart-title" id="heatmapTitle">Mapa de Calor</div>
+        <div class="modal-sub" id="heatmapSub"></div>
+      </div>
+      <button class="modal-close" onclick="closeHeatmap()">✕</button>
+    </div>
+    <div id="heatmapGrid" class="heatmap-wrap"></div>
+  </div>
 </div>
 
 <script src="assets/js/dashboard.js"></script>

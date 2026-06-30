@@ -8,6 +8,8 @@
   ],
   "functions": {
     "api/refresh-cache.js": { "maxDuration": 60 },
-    "api/sheet-data.js": { "maxDuration": 60 }
+    "api/sheet-data.js": { "maxDuration": 60 },
+    "api/sheet-summary.js": { "maxDuration": 60 },
+    "api/sheet-heatmap.js": { "maxDuration": 30 }
   }
 }
