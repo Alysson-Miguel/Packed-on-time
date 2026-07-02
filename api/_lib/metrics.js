@@ -28,7 +28,8 @@ function buildIndex(headers) {
     packed: headers.indexOf('packed_datetime'),
     cpt: headers.indexOf('cpt_planejado'),
     turno: headers.indexOf('turno_ofensor'),
-    zona: headers.indexOf('grupo_stage_inbound'),
+    zona: headers.indexOf('zona_classificada'),
+    oot: headers.indexOf('OOT'),
     stagingIn: headers.indexOf('staging_in_datetime'),
     minPacking: headers.indexOf('min_no_packing'),
     horasStage: headers.indexOf('horas_no_stage_inbound'),
@@ -49,6 +50,7 @@ function rowFields(row, idx) {
     packed,
     turno: row[idx.turno] || 'Não informado',
     zona: (row[idx.zona] || 'Não informado').trim() || 'Não informado',
+    oot: (row[idx.oot] || '').trim(),
     minPacking,
     horasStage,
     totalCycle,
@@ -87,6 +89,7 @@ function buildStats(rows, headers, opts) {
   const idx = buildIndex(headers);
 
   let total = 0;
+  let cptNotAvailable = 0;
   let delaySum = 0, delayCount = 0, maxDelay = -Infinity;
   let cycleSum = 0, cycleCount = 0;
   const diag = {
@@ -98,6 +101,9 @@ function buildStats(rows, headers, opts) {
   const zonaCount = {};
   const zonaHorasSum = {};
   const zonaHorasCount = {};
+  const zonaOutCount = {};
+  const turnoOutCount = {};
+  const horaOutCount = {};
   const cicloBuckets = CICLO_EDGES.map(() => 0);
   const packingBuckets = PACKING_EDGES.map(() => 0);
   let naoInformadoCount = 0;
@@ -112,6 +118,7 @@ function buildStats(rows, headers, opts) {
     if (zonaFilter && f.zona !== zonaFilter) continue;
 
     total++;
+    if (f.oot === 'CPT not available') { cptNotAvailable++; continue; }
     if (f.atrasoH !== null) {
       delaySum += f.atrasoH; delayCount++;
       if (f.atrasoH > maxDelay) maxDelay = f.atrasoH;
@@ -124,6 +131,11 @@ function buildStats(rows, headers, opts) {
 
     turnoCount[f.turno] = (turnoCount[f.turno] || 0) + 1;
     zonaCount[f.zona] = (zonaCount[f.zona] || 0) + 1;
+    if (f.atrasoH !== null && f.atrasoH > 0) {
+      zonaOutCount[f.zona] = (zonaOutCount[f.zona] || 0) + 1;
+      turnoOutCount[f.turno] = (turnoOutCount[f.turno] || 0) + 1;
+      if (f.received) horaOutCount[f.received.hour] = (horaOutCount[f.received.hour] || 0) + 1;
+    }
     if (f.horasStage !== null) {
       zonaHorasSum[f.zona] = (zonaHorasSum[f.zona] || 0) + f.horasStage;
       zonaHorasCount[f.zona] = (zonaHorasCount[f.zona] || 0) + 1;
@@ -142,6 +154,14 @@ function buildStats(rows, headers, opts) {
     .sort((a, b) => b.count - a.count);
   const turnoRanked = Object.entries(turnoCount).sort((a, b) => b[1] - a[1]);
 
+  const totalOutTime = Object.values(zonaOutCount).reduce((s, v) => s + v, 0);
+  const porZonaOutTime = Object.keys(zonaOutCount)
+    .map(z => ({ zona: z, count: zonaOutCount[z], pct: totalOutTime ? (zonaOutCount[z] / totalOutTime) * 100 : 0 }))
+    .sort((a, b) => b.count - a.count);
+  const porTurnoOutTime = Object.keys(turnoOutCount)
+    .map(t => ({ turno: t, count: turnoOutCount[t], pct: totalOutTime ? (turnoOutCount[t] / totalOutTime) * 100 : 0 }))
+    .sort((a, b) => b.count - a.count);
+
   const avgDelayH = delayCount ? delaySum / delayCount : null;
   const maxDelayH = delayCount ? maxDelay : null;
   const avgCycleH = cycleCount ? cycleSum / cycleCount : null;
@@ -151,6 +171,10 @@ function buildStats(rows, headers, opts) {
   const naoInformadoPct = total ? (naoInformadoCount / total) * 100 : 0;
   const outlier = (delayCount && maxDelayH !== null && avgDelayH !== null && maxDelayH > avgDelayH * 3 && maxDelayH > 24)
     ? { maxAtraso: maxDelayH, avgAtraso: avgDelayH } : null;
+  const horaOutEntries = Object.entries(horaOutCount).sort((a, b) => b[1] - a[1]);
+  const picoHora = horaOutEntries.length
+    ? { hora: +horaOutEntries[0][0], count: horaOutEntries[0][1], pct: totalOutTime ? (horaOutEntries[0][1] / totalOutTime) * 100 : 0 }
+    : null;
 
   return {
     total,
@@ -158,6 +182,9 @@ function buildStats(rows, headers, opts) {
     diagnostico,
     porTurno,
     porZona,
+    totalOutTime,
+    porZonaOutTime,
+    porTurnoOutTime,
     histCiclo: bucketsToStats(cicloBuckets, CICLO_EDGES, 'h'),
     histPacking: bucketsToStats(packingBuckets, PACKING_EDGES, 'min'),
     insights: {
@@ -165,7 +192,9 @@ function buildStats(rows, headers, opts) {
       topZona: porZona.length ? porZona[0] : null,
       naoInformadoPct,
       topTurno: turnoRanked.length ? { turno: turnoRanked[0][0], count: turnoRanked[0][1] } : null,
-      outlier
+      outlier,
+      picoHora,
+      cptNotAvailable
     }
   };
 }

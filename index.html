@@ -90,8 +90,26 @@
 
   <div class="section-title">Por Zona — Ranking de Ofensores</div>
   <div class="table-card">
-    <div class="table-header"><span class="chart-title">Zonas (grupo_stage_inbound) por volume e tempo médio</span><span class="chart-badge">Clique na zona p/ mapa de calor</span></div>
+    <div class="table-header"><span class="chart-title">Zonas (zona_classificada) por volume e tempo médio</span><span class="chart-badge">Clique na zona p/ mapa de calor</span></div>
     <div id="zonaRanking" style="padding:16px" class="zona-ranking"></div>
+  </div>
+
+  <div class="section-title">Out of Time por Zona e Turno</div>
+  <div class="charts-row">
+    <div class="chart-card">
+      <div class="chart-header">
+        <span class="chart-title">% Out of Time por Zona</span>
+        <span class="chart-badge">Apenas pacotes atrasados</span>
+      </div>
+      <div class="chart-canvas" style="height:280px"><canvas id="chartOutTimeZona"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-header">
+        <span class="chart-title">% Out of Time por Turno</span>
+        <span class="chart-badge">Direcionamento operacional</span>
+      </div>
+      <div id="outTimeTurnoBreakdown" style="padding:16px;display:flex;flex-direction:column;gap:10px"></div>
+    </div>
   </div>
 
   <div class="section-title">Tempo de Ciclo</div>

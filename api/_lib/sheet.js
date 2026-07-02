@@ -13,7 +13,7 @@ const SNAPSHOT_KEY = 'packed-on-time-snapshot.json';
 // já estão marcadas como "Ignorado por performance" e não precisam ir pro cache.
 const ACTIVE_HEADERS = [
   'br', 'to_number', 'received_datetime', 'packed_datetime', 'cpt_planejado', 'turno_ofensor',
-  'grupo_stage_inbound', 'staging_in_datetime', 'detach_inbound_datetime',
+  'zona_classificada', 'OOT', 'staging_in_datetime', 'detach_inbound_datetime',
   'min_no_packing', 'horas_no_stage_inbound', 'total_received_ate_packed_h'
 ];
 
@@ -81,8 +81,9 @@ async function fetchAndCacheSnapshot() {
   const colA = countResp.data.values || [];
   const totalRows = colA.length;
 
+  const activeHeadersKey = ACTIVE_HEADERS.join('|');
   const existing = await loadExistingSnapshot();
-  let needsFullSync = !existing || !existing.lastRowCount || !existing.rawHeaders || existing.windowDays !== WINDOW_DAYS || totalRows < existing.lastRowCount;
+  let needsFullSync = !existing || !existing.lastRowCount || !existing.rawHeaders || existing.windowDays !== WINDOW_DAYS || totalRows < existing.lastRowCount || existing.activeHeadersKey !== activeHeadersKey;
 
   if (!needsFullSync && existing.lastRowCount > 1) {
     const markerNow = (colA[existing.lastRowCount - 1] && colA[existing.lastRowCount - 1][0]) || '';
@@ -111,7 +112,7 @@ async function fetchAndCacheSnapshot() {
   }
 
   if (!headers.length) {
-    const empty = { lastUpdate: new Date().toISOString(), headers: [], rows: [], lastRowCount: totalRows, windowDays: WINDOW_DAYS, lastRowMarker: '', rawHeaders: rawHeaders || [], dateBounds: null, dailyCounts: {} };
+    const empty = { lastUpdate: new Date().toISOString(), headers: [], rows: [], lastRowCount: totalRows, windowDays: WINDOW_DAYS, lastRowMarker: '', rawHeaders: rawHeaders || [], dateBounds: null, dailyCounts: {}, activeHeadersKey };
     await put(SNAPSHOT_KEY, JSON.stringify(empty), { access: 'private', contentType: 'application/json', allowOverwrite: true, addRandomSuffix: false });
     return { snapshot: empty, totalSheetRows: 0, cachedRows: 0, cutoff: null };
   }
@@ -145,7 +146,8 @@ async function fetchAndCacheSnapshot() {
     lastRowMarker,
     rawHeaders,
     dateBounds,
-    dailyCounts
+    dailyCounts,
+    activeHeadersKey
   };
   await put(SNAPSHOT_KEY, JSON.stringify(snapshot), { access: 'private', contentType: 'application/json', allowOverwrite: true, addRandomSuffix: false });
 

@@ -103,7 +103,8 @@ async function loadRows(force, from, to) {
 const EMPTY_STATS = {
   total: 0, avgDelayH: null, maxDelayH: null, avgCycleH: null,
   diagnostico: { 'Aguardando Stage': { count: 0, avg: null }, 'Stage': { count: 0, avg: null }, 'Packing': { count: 0, avg: null } },
-  porTurno: [], porZona: [], histCiclo: [], histPacking: [], insights: {}
+  porTurno: [], porZona: [], histCiclo: [], histPacking: [], insights: {},
+  totalOutTime: 0, porZonaOutTime: [], porTurnoOutTime: []
 };
 
 async function loadAggregate(force) {
@@ -224,7 +225,8 @@ function normalizeRow(r) {
     hub: r.hub_destino,
     received, packed, cpt,
     turno: r.turno_ofensor || 'Não informado',
-    zona: (r.grupo_stage_inbound || 'Não informado').trim() || 'Não informado',
+    zona: (r.zona_classificada || 'Não informado').trim() || 'Não informado',
+    oot: (r.OOT || '').trim(),
     stagingIn,
     detach: parseDate(r.detach_inbound_datetime),
     minPacking: toNumber(r.min_no_packing),
@@ -323,6 +325,7 @@ function renderAll(stats) {
   renderDiagnostico(stats);
   renderTurnoChart(stats);
   renderZonaRanking(stats);
+  renderOutTimeZonaTurno(stats);
   renderHistogramFromBuckets('chartCiclo', stats.histCiclo);
   renderHistogramFromBuckets('chartPacking', stats.histPacking);
   renderDrilldown();
@@ -360,10 +363,13 @@ function computeStatsFromRows(rows) {
   const turnoCount = {}, zonaCount = {}, zonaHorasSum = {}, zonaHorasCount = {};
   let delaySum = 0, delayCount = 0, maxDelay = -Infinity;
   let cycleSum = 0, cycleCount = 0;
+  let cptNotAvailable = 0;
   let naoInformadoCount = 0;
   const cycleValues = [], packingValues = [];
 
   rows.forEach(r => {
+    if (r.oot === 'CPT not available') { cptNotAvailable++; return; }
+
     if (r.atrasoH !== null) {
       delaySum += r.atrasoH; delayCount++;
       if (r.atrasoH > maxDelay) maxDelay = r.atrasoH;
@@ -395,6 +401,25 @@ function computeStatsFromRows(rows) {
     .sort((a, b) => b.count - a.count);
   const turnoRanked = Object.entries(turnoCount).sort((a, b) => b[1] - a[1]);
 
+  const outTimeRows = rows.filter(r => r.oot !== 'CPT not available' && r.atrasoH !== null && r.atrasoH > 0);
+  const totalOutTime = outTimeRows.length;
+  const zonaOutCount = {}, turnoOutCount = {}, horaOutCount = {};
+  outTimeRows.forEach(r => {
+    zonaOutCount[r.zona] = (zonaOutCount[r.zona] || 0) + 1;
+    turnoOutCount[r.turno] = (turnoOutCount[r.turno] || 0) + 1;
+    if (r.received) { const h = r.received.getHours(); horaOutCount[h] = (horaOutCount[h] || 0) + 1; }
+  });
+  const horaOutEntries = Object.entries(horaOutCount).sort((a, b) => b[1] - a[1]);
+  const picoHora = horaOutEntries.length
+    ? { hora: +horaOutEntries[0][0], count: horaOutEntries[0][1], pct: totalOutTime ? (horaOutEntries[0][1] / totalOutTime) * 100 : 0 }
+    : null;
+  const porZonaOutTime = Object.keys(zonaOutCount)
+    .map(z => ({ zona: z, count: zonaOutCount[z], pct: totalOutTime ? (zonaOutCount[z] / totalOutTime) * 100 : 0 }))
+    .sort((a, b) => b.count - a.count);
+  const porTurnoOutTime = Object.keys(turnoOutCount)
+    .map(t => ({ turno: t, count: turnoOutCount[t], pct: totalOutTime ? (turnoOutCount[t] / totalOutTime) * 100 : 0 }))
+    .sort((a, b) => b.count - a.count);
+
   const avgDelayH = delayCount ? delaySum / delayCount : null;
   const maxDelayH = delayCount ? maxDelay : null;
   const avgCycleH = cycleCount ? cycleSum / cycleCount : null;
@@ -411,6 +436,9 @@ function computeStatsFromRows(rows) {
     diagnostico,
     porTurno,
     porZona,
+    totalOutTime,
+    porZonaOutTime,
+    porTurnoOutTime,
     histCiclo: bucketize(cycleValues, CICLO_EDGES, 'h'),
     histPacking: bucketize(packingValues, PACKING_EDGES, 'min'),
     insights: {
@@ -418,7 +446,9 @@ function computeStatsFromRows(rows) {
       topZona: porZona.length ? porZona[0] : null,
       naoInformadoPct,
       topTurno: turnoRanked.length ? { turno: turnoRanked[0][0], count: turnoRanked[0][1] } : null,
-      outlier
+      outlier,
+      picoHora,
+      cptNotAvailable
     }
   };
 }
@@ -434,7 +464,7 @@ function renderInsights(stats) {
   }
 
   const items = [];
-  const { topProc, topZona, naoInformadoPct, topTurno, outlier } = stats.insights;
+  const { topProc, topZona, naoInformadoPct, topTurno, outlier, picoHora, cptNotAvailable } = stats.insights;
 
   if (topProc) {
     items.push(`<strong>${fmtPct((topProc.count / total) * 100)}</strong> dos pacotes (${topProc.count.toLocaleString('pt-BR')} de ${total.toLocaleString('pt-BR')}) tiveram seu maior tempo perdido no processo <strong>${topProc.label}</strong>, com média de ${fmtDuration(topProc.avg)} nessa etapa.`);
@@ -443,10 +473,16 @@ function renderInsights(stats) {
     items.push(`A zona <strong>${escapeHtml(topZona.zona)}</strong> concentra <strong>${fmtPct((topZona.count / total) * 100)}</strong> dos pacotes (${topZona.count.toLocaleString('pt-BR')}).`);
   }
   if (naoInformadoPct > 5) {
-    items.push({ warn: true, html: `<strong>${fmtPct(naoInformadoPct)}</strong> dos pacotes não têm zona registrada — esses são pacotes sem endereçamento no Stage In (campo grupo_stage_inbound vazio), o que limita a análise por zona.` });
+    items.push({ warn: true, html: `<strong>${fmtPct(naoInformadoPct)}</strong> dos pacotes não têm zona registrada — esses são pacotes sem zona_classificada preenchida, o que limita a análise por zona.` });
   }
   if (topTurno) {
     items.push(`O <strong>${escapeHtml(topTurno.turno)}</strong> concentra a maior parte dos atrasos: <strong>${fmtPct((topTurno.count / total) * 100)}</strong> (${topTurno.count.toLocaleString('pt-BR')} pacotes).`);
+  }
+  if (picoHora) {
+    items.push(`Pacotes recebidos às <strong>${picoHora.hora}h</strong> concentram <strong>${fmtPct(picoHora.pct)}</strong> dos atrasos (${picoHora.count.toLocaleString('pt-BR')} pacotes) — é o horário de recebimento com maior risco de não cumprir o CPT.`);
+  }
+  if (cptNotAvailable > 0) {
+    items.push({ warn: false, html: `<strong>${cptNotAvailable.toLocaleString('pt-BR')}</strong> pacote(s) com CPT não disponível — esses não foram considerados no cálculo de Out of Time.` });
   }
   if (outlier) {
     items.push({ warn: true, html: `O pior caso individual chegou a <strong>${fmtDuration(outlier.maxAtraso)}</strong> de atraso — bem acima da média (${fmtDuration(outlier.avgAtraso)}). Parece ser uma exceção isolada, não o padrão do período.` });
@@ -643,6 +679,71 @@ function renderHeatmapGrid({ matrix, dates, max }) {
   });
   html += '</div>';
   container.innerHTML = html;
+}
+
+// ---------- Out of Time por Zona e Turno ----------
+
+const PIE_COLORS = ['#ea580c','#0f172a','#f97316','#334155','#475569','#94a3b8','#1e293b','#64748b','#fbbf24','#cbd5e1'];
+
+function renderOutTimeZonaTurno(stats) {
+  const zonas = stats.porZonaOutTime || [];
+  const turnos = stats.porTurnoOutTime || [];
+
+  destroyChart('chartOutTimeZona');
+
+  if (zonas.length) {
+    charts.chartOutTimeZona = new Chart(document.getElementById('chartOutTimeZona'), {
+      type: 'doughnut',
+      data: {
+        labels: zonas.map(z => z.zona),
+        datasets: [{
+          data: zonas.map(z => +z.pct.toFixed(2)),
+          backgroundColor: zonas.map((_, i) => PIE_COLORS[i % PIE_COLORS.length]),
+          borderWidth: 2,
+          borderColor: '#fff'
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '55%',
+        plugins: {
+          legend: {
+            position: 'right',
+            labels: { color: '#475569', font: { size: 10, family: 'Inter' }, padding: 10, boxWidth: 10, usePointStyle: true }
+          },
+          tooltip: {
+            backgroundColor: '#fff', borderColor: '#e5e7eb', borderWidth: 1,
+            titleColor: '#0f172a', bodyColor: '#475569', padding: 10,
+            callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed.toFixed(1)}% (${zonas[ctx.dataIndex].count.toLocaleString('pt-BR')} pcts)` }
+          },
+          datalabels: {
+            display: ctx => ctx.dataset.data[ctx.dataIndex] >= 5,
+            formatter: val => val.toFixed(1) + '%',
+            color: '#fff',
+            font: { size: 10, weight: 'bold', family: 'JetBrains Mono' }
+          }
+        }
+      }
+    });
+  }
+
+  const container = document.getElementById('outTimeTurnoBreakdown');
+  const total = stats.totalOutTime || 0;
+
+  if (!turnos.length || !total) {
+    container.innerHTML = '<p style="color:var(--text-muted);font-size:12px">Sem dados Out of Time para os filtros selecionados.</p>';
+    return;
+  }
+
+  container.innerHTML = turnos.map((t, i) => `
+    <div class="otturno-row${i === 0 ? ' otturno-top' : ''}">
+      <div class="otturno-name">${escapeHtml(t.turno)}${i === 0 ? '<span class="otturno-badge">Maior Ofensor</span>' : ''}</div>
+      <div class="otturno-bar-wrap"><div class="otturno-bar" style="width:${Math.min(t.pct, 100)}%"></div></div>
+      <div class="otturno-pct">${t.pct.toFixed(1)}%</div>
+      <div class="otturno-cnt">${t.count.toLocaleString('pt-BR')} pcts</div>
+    </div>
+  `).join('');
 }
 
 // ---------- Histogramas ----------
