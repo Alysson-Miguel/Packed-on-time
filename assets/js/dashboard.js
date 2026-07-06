@@ -18,7 +18,7 @@ if (typeof ChartDataLabels !== 'undefined') Chart.register(ChartDataLabels);
 
 function loadMockData() {
   dataMode = 'rows';
-  rawData = MOCK_ROWS.map(normalizeRow);
+  rawData = MOCK_ROWS.map(normalizeRow).filter(r => r.oot !== 'CPT not available');
   cacheDateBounds = null;
   document.getElementById('liveDot').classList.add('mock');
   document.getElementById('liveLabel').textContent = 'Mock';
@@ -85,7 +85,7 @@ async function loadRows(force, from, to) {
     }
     setStatus(payload.notice ? 'load' : 'ok', payload.notice || `Conectado à planilha. ${rows.length.toLocaleString('pt-BR')} registros carregados (${rangeLabel}).`);
 
-    rawData = rows.map(normalizeRow);
+    rawData = rows.map(normalizeRow).filter(r => r.oot !== 'CPT not available');
     populateFilterOptions();
     applyFilters();
   } catch (err) {
@@ -363,13 +363,10 @@ function computeStatsFromRows(rows) {
   const turnoCount = {}, zonaCount = {}, zonaHorasSum = {}, zonaHorasCount = {};
   let delaySum = 0, delayCount = 0, maxDelay = -Infinity;
   let cycleSum = 0, cycleCount = 0;
-  let cptNotAvailable = 0;
   let naoInformadoCount = 0;
   const cycleValues = [], packingValues = [];
 
   rows.forEach(r => {
-    if (r.oot === 'CPT not available') { cptNotAvailable++; return; }
-
     if (r.atrasoH !== null) {
       delaySum += r.atrasoH; delayCount++;
       if (r.atrasoH > maxDelay) maxDelay = r.atrasoH;
@@ -401,7 +398,7 @@ function computeStatsFromRows(rows) {
     .sort((a, b) => b.count - a.count);
   const turnoRanked = Object.entries(turnoCount).sort((a, b) => b[1] - a[1]);
 
-  const outTimeRows = rows.filter(r => r.oot !== 'CPT not available' && r.atrasoH !== null && r.atrasoH > 0);
+  const outTimeRows = rows.filter(r => r.atrasoH !== null && r.atrasoH > 0);
   const totalOutTime = outTimeRows.length;
   const zonaOutCount = {}, turnoOutCount = {}, horaOutCount = {};
   outTimeRows.forEach(r => {
@@ -447,8 +444,7 @@ function computeStatsFromRows(rows) {
       naoInformadoPct,
       topTurno: turnoRanked.length ? { turno: turnoRanked[0][0], count: turnoRanked[0][1] } : null,
       outlier,
-      picoHora,
-      cptNotAvailable
+      picoHora
     }
   };
 }
@@ -464,7 +460,7 @@ function renderInsights(stats) {
   }
 
   const items = [];
-  const { topProc, topZona, naoInformadoPct, topTurno, outlier, picoHora, cptNotAvailable } = stats.insights;
+  const { topProc, topZona, naoInformadoPct, topTurno, outlier, picoHora } = stats.insights;
 
   if (topProc) {
     items.push(`<strong>${fmtPct((topProc.count / total) * 100)}</strong> dos pacotes (${topProc.count.toLocaleString('pt-BR')} de ${total.toLocaleString('pt-BR')}) tiveram seu maior tempo perdido no processo <strong>${topProc.label}</strong>, com média de ${fmtDuration(topProc.avg)} nessa etapa.`);
@@ -480,9 +476,6 @@ function renderInsights(stats) {
   }
   if (picoHora) {
     items.push(`Pacotes recebidos às <strong>${picoHora.hora}h</strong> concentram <strong>${fmtPct(picoHora.pct)}</strong> dos atrasos (${picoHora.count.toLocaleString('pt-BR')} pacotes) — é o horário de recebimento com maior risco de não cumprir o CPT.`);
-  }
-  if (cptNotAvailable > 0) {
-    items.push({ warn: false, html: `<strong>${cptNotAvailable.toLocaleString('pt-BR')}</strong> pacote(s) com CPT não disponível — esses não foram considerados no cálculo de Out of Time.` });
   }
   if (outlier) {
     items.push({ warn: true, html: `O pior caso individual chegou a <strong>${fmtDuration(outlier.maxAtraso)}</strong> de atraso — bem acima da média (${fmtDuration(outlier.avgAtraso)}). Parece ser uma exceção isolada, não o padrão do período.` });

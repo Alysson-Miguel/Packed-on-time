@@ -89,7 +89,6 @@ function buildStats(rows, headers, opts) {
   const idx = buildIndex(headers);
 
   let total = 0;
-  let cptNotAvailable = 0;
   let delaySum = 0, delayCount = 0, maxDelay = -Infinity;
   let cycleSum = 0, cycleCount = 0;
   const diag = {
@@ -116,9 +115,9 @@ function buildStats(rows, headers, opts) {
     if (to && d > to) continue;
     if (turnoFilter && f.turno !== turnoFilter) continue;
     if (zonaFilter && f.zona !== zonaFilter) continue;
+    if (f.oot === 'CPT not available') continue;
 
     total++;
-    if (f.oot === 'CPT not available') { cptNotAvailable++; continue; }
     if (f.atrasoH !== null) {
       delaySum += f.atrasoH; delayCount++;
       if (f.atrasoH > maxDelay) maxDelay = f.atrasoH;
@@ -193,8 +192,7 @@ function buildStats(rows, headers, opts) {
       naoInformadoPct,
       topTurno: turnoRanked.length ? { turno: turnoRanked[0][0], count: turnoRanked[0][1] } : null,
       outlier,
-      picoHora,
-      cptNotAvailable
+      picoHora
     }
   };
 }
