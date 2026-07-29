@@ -1,15 +1,6 @@
 {
   "version": 2,
-  "crons": [
-    {
-      "path": "/api/refresh-cache",
-      "schedule": "0 6 * * *"
-    }
-  ],
   "functions": {
-    "api/refresh-cache.js": { "maxDuration": 60 },
-    "api/sheet-data.js": { "maxDuration": 60 },
-    "api/sheet-summary.js": { "maxDuration": 60 },
-    "api/sheet-heatmap.js": { "maxDuration": 30 }
+    "api/packed-summary.js": { "maxDuration": 30 }
   }
 }

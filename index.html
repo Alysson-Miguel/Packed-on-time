@@ -3,13 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>KPI — Packed On Time</title>
+<title>Packed On Time — Resumo</title>
+<script>(function(){var t=localStorage.getItem('pot-theme')||'dark';document.documentElement.setAttribute('data-theme',t);})();</script>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
-<script src="config.js"></script>
-<script src="assets/js/mock-data.js"></script>
-<link rel="stylesheet" href="assets/css/dashboard.css">
+<link rel="stylesheet" href="assets/css/style.css">
 </head>
 <body>
 
@@ -20,10 +18,11 @@
     <div class="logo-badge">POT</div>
     <div class="header-title">
       <h1>Packed On Time</h1>
-      <p>Acompanhamento Operacional — Cumprimento do CPT de Packed</p>
+      <p>Resumo agregado · dia · turno · hub · zona</p>
     </div>
   </div>
   <div class="header-right">
+    <button class="btn-theme" id="themeToggle" onclick="toggleTheme()">—</button>
     <div class="last-update">
       <div class="label">Última Atualização</div>
       <div class="value" id="lastUpdate">—</div>
@@ -35,124 +34,76 @@
 <div class="filters-bar">
   <span class="filter-label">Filtros:</span>
   <div class="filter-group"><span class="filter-label">Packed de</span>
-    <input type="date" id="filterDataIni" onchange="onDateFilterChange()">
+    <input type="date" id="filterDataIni" onchange="loadPacked(false)">
   </div>
   <div class="filter-group"><span class="filter-label">até</span>
-    <input type="date" id="filterDataFim" onchange="onDateFilterChange()">
+    <input type="date" id="filterDataFim" onchange="loadPacked(false)">
   </div>
   <div class="filter-group"><span class="filter-label">Turno</span>
-    <select id="filterTurno" onchange="onCategoryFilterChange()"><option value="">Todos</option></select>
+    <select id="filterTurno" onchange="loadPacked(false)"><option value="">Todos</option></select>
   </div>
   <div class="filter-group"><span class="filter-label">Zona</span>
-    <select id="filterZona" onchange="onCategoryFilterChange()"><option value="">Todas</option></select>
+    <select id="filterZona" onchange="loadPacked(false)"><option value="">Todas</option></select>
+  </div>
+  <div class="filter-group"><span class="filter-label">Hub</span>
+    <select id="filterHub" onchange="loadPacked(false)"><option value="">Todos</option></select>
   </div>
   <button class="btn-config" onclick="clearFilters()">✕ Limpar</button>
-  <button class="btn-refresh" id="btnRefresh" onclick="refreshData()">⟳ Atualizar</button>
+  <button class="btn-refresh" id="btnRefresh" onclick="loadPacked(true)">⟳ Atualizar</button>
 </div>
 
 <div class="main">
 
-  <div class="status-bar" id="statusBar"><span>⬤</span><span id="statusText">Carregando dados...</span></div>
+  <div class="status-bar" id="statusBar"><span>●</span><span id="statusText">Carregando dados...</span></div>
 
   <div class="section-title">KPI Geral</div>
   <div class="kpi-grid">
-    <div class="kpi-card"><div class="kpi-label">Total de Pacotes Atrasados</div><div class="kpi-value" id="kpiTotal">—</div><div class="kpi-sub">No período filtrado</div></div>
-    <div class="kpi-card accent"><div class="kpi-label">Atraso Médio</div><div class="kpi-value" id="kpiAvgDelay">—</div><div class="kpi-sub">Packed vs. CPT Planejado</div></div>
-    <div class="kpi-card danger"><div class="kpi-label">Maior Atraso</div><div class="kpi-value" id="kpiMaxDelay">—</div><div class="kpi-sub">Pior caso no período</div></div>
-    <div class="kpi-card"><div class="kpi-label">Tempo Médio de Ciclo</div><div class="kpi-value" id="kpiAvgCycle">—</div><div class="kpi-sub">Recebido → Packed</div></div>
+    <div class="kpi-card"><div class="kpi-label">Total de Pacotes</div><div class="kpi-value" id="kpiTotal">—</div><div class="kpi-sub">No período filtrado</div></div>
+    <div class="kpi-card accent"><div class="kpi-label">Atraso Médio</div><div class="kpi-value" id="kpiAvgAtraso">—</div><div class="kpi-sub">Packed vs. CPT Planejado</div></div>
+    <div class="kpi-card"><div class="kpi-label">Lead Time Médio</div><div class="kpi-value" id="kpiAvgLead">—</div><div class="kpi-sub">Recebido → Packed</div></div>
+    <div class="kpi-card"><div class="kpi-label">Packing Médio</div><div class="kpi-value" id="kpiAvgPacking">—</div><div class="kpi-sub">Tempo no processo</div></div>
+    <div class="kpi-card"><div class="kpi-label">Stage Inbound Médio</div><div class="kpi-value" id="kpiAvgStage">—</div><div class="kpi-sub">Tempo aguardando stage</div></div>
   </div>
 
   <div class="section-title">Insights Automáticos</div>
-  <div class="table-card" style="padding:16px">
+  <div class="table-card" style="padding:18px 20px">
     <ul class="insights-list" id="insightsList"><li>Carregando...</li></ul>
   </div>
 
-  <div class="section-title">Diagnóstico do Processo — Onde o Tempo é Consumido</div>
-  <div class="diag-grid">
-    <div class="diag-card"><div class="dv" id="diagEspera">—</div><div class="dl">Aguardando Stage</div><div class="dp" id="diagEsperaSub">—</div></div>
-    <div class="diag-card"><div class="dv" id="diagStage">—</div><div class="dl">Stage</div><div class="dp" id="diagStageSub">—</div></div>
-    <div class="diag-card"><div class="dv" id="diagPacking">—</div><div class="dl">Packing</div><div class="dp" id="diagPackingSub">—</div></div>
-  </div>
-  <div class="charts-row" style="margin-top:16px">
+  <div class="section-title">Tendência de Atraso Médio</div>
+  <div class="charts-row">
     <div class="chart-card full">
-      <div class="chart-header"><span class="chart-title">Processo Predominante no Atraso (% dos pacotes)</span><span class="chart-badge">Diagnóstico</span></div>
-      <div class="chart-canvas" style="height:140px"><canvas id="chartDiagnostico"></canvas></div>
+      <div class="chart-header"><span class="chart-title">Atraso médio por dia</span><span class="chart-badge">min</span></div>
+      <div class="chart-canvas"><canvas id="chartTrend"></canvas></div>
     </div>
   </div>
 
   <div class="section-title">Por Turno</div>
   <div class="charts-row">
-    <div class="chart-card full">
-      <div class="chart-header"><span class="chart-title">Pacotes Atrasados por Turno</span><span class="chart-badge">Clique na barra p/ mapa de calor</span></div>
-      <div class="chart-canvas"><canvas id="chartTurno"></canvas></div>
+    <div class="chart-card">
+      <div class="chart-header"><span class="chart-title">Volume de Pacotes</span><span class="chart-badge">unid.</span></div>
+      <div class="chart-canvas" style="height:200px"><canvas id="chartTurnoVolume"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-header"><span class="chart-title">Atraso Médio</span><span class="chart-badge">min</span></div>
+      <div class="chart-canvas" style="height:200px"><canvas id="chartTurnoAtraso"></canvas></div>
     </div>
   </div>
 
-  <div class="section-title">Por Zona — Ranking de Ofensores</div>
-  <div class="table-card">
-    <div class="table-header"><span class="chart-title">Zonas (zona_classificada) por volume e tempo médio</span><span class="chart-badge">Clique na zona p/ mapa de calor</span></div>
-    <div id="zonaRanking" style="padding:16px" class="zona-ranking"></div>
-  </div>
-
-  <div class="section-title">Out of Time por Zona e Turno</div>
+  <div class="section-title">Ranking por Atraso Médio</div>
   <div class="charts-row">
-    <div class="chart-card">
-      <div class="chart-header">
-        <span class="chart-title">% Out of Time por Zona</span>
-        <span class="chart-badge">Apenas pacotes atrasados</span>
-      </div>
-      <div class="chart-canvas" style="height:280px"><canvas id="chartOutTimeZona"></canvas></div>
+    <div class="table-card">
+      <div class="table-header"><span class="chart-title">Por Zona</span><span class="chart-badge">Top 12</span></div>
+      <div id="rankZona" class="rank-list"></div>
     </div>
-    <div class="chart-card">
-      <div class="chart-header">
-        <span class="chart-title">% Out of Time por Turno</span>
-        <span class="chart-badge">Direcionamento operacional</span>
-      </div>
-      <div id="outTimeTurnoBreakdown" style="padding:16px;display:flex;flex-direction:column;gap:10px"></div>
-    </div>
-  </div>
-
-  <div class="section-title">Tempo de Ciclo</div>
-  <div class="charts-row">
-    <div class="chart-card">
-      <div class="chart-header"><span class="chart-title">Distribuição do Ciclo Total (h)</span><span class="chart-badge">Ciclo</span></div>
-      <div class="chart-canvas"><canvas id="chartCiclo"></canvas></div>
-    </div>
-    <div class="chart-card">
-      <div class="chart-header"><span class="chart-title">Distribuição do Tempo de Packing (min)</span><span class="chart-badge">Packing</span></div>
-      <div class="chart-canvas"><canvas id="chartPacking"></canvas></div>
-    </div>
-  </div>
-
-  <div class="section-title">Drill-down por Pacote</div>
-  <div class="table-card">
-    <div class="table-header">
-      <span class="chart-title">Consulta individual</span>
-      <input type="text" id="searchBr" placeholder="Buscar por TO Number..." oninput="renderDrilldown()">
-    </div>
-    <div style="overflow-x:auto">
-      <table>
-        <thead><tr><th>TO Number</th><th>BR</th><th>Turno</th><th>Recebido</th><th>Aguardando Stage</th><th>Stage</th><th>Detach</th><th>Packing</th><th>Packed</th><th>CPT Planejado</th><th>Atraso (h)</th><th>Zona</th></tr></thead>
-        <tbody id="drilldownBody"><tr><td colspan="12" style="text-align:center;color:var(--text-muted);padding:24px">Aguardando dados...</td></tr></tbody>
-      </table>
+    <div class="table-card">
+      <div class="table-header"><span class="chart-title">Por Hub</span><span class="chart-badge">Top 12</span></div>
+      <div id="rankHub" class="rank-list"></div>
     </div>
   </div>
 
 </div>
 
-<div class="modal-overlay" id="heatmapModal" onclick="if(event.target===this) closeHeatmap()">
-  <div class="modal-box">
-    <div class="modal-header">
-      <div>
-        <div class="chart-title" id="heatmapTitle">Mapa de Calor</div>
-        <div class="modal-sub" id="heatmapSub"></div>
-      </div>
-      <button class="modal-close" onclick="closeHeatmap()">✕</button>
-    </div>
-    <div id="heatmapGrid" class="heatmap-wrap"></div>
-  </div>
-</div>
-
-<script src="assets/js/dashboard.js"></script>
+<script src="assets/js/app.js"></script>
 </body>
 </html>
