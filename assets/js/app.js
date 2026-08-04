@@ -1,4 +1,7 @@
 let stats = null, charts = {};
+const msState = { Turno: [], Zona: [], Hub: [] };
+const msLabels = { Turno: 'Todos', Zona: 'Todas', Hub: 'Todos' };
+const msOptionsCache = { Turno: [], Zona: [], Hub: [] };
 
 if (typeof ChartDataLabels !== 'undefined') Chart.register(ChartDataLabels);
 
@@ -22,16 +25,12 @@ async function loadPacked(force) {
   try {
     const from = document.getElementById('filterDataIni').value;
     const to = document.getElementById('filterDataFim').value;
-    const turno = document.getElementById('filterTurno').value;
-    const zona = document.getElementById('filterZona').value;
-    const hub = document.getElementById('filterHub').value;
-
     const params = new URLSearchParams();
     if (from) params.set('from', from);
     if (to) params.set('to', to);
-    if (turno) params.set('turno', turno);
-    if (zona) params.set('zona', zona);
-    if (hub) params.set('hub', hub);
+    if (msState.Turno.length) params.set('turno', msState.Turno.join(','));
+    if (msState.Zona.length) params.set('zona', msState.Zona.join(','));
+    if (msState.Hub.length) params.set('hub', msState.Hub.join(','));
 
     const response = await fetch('/api/packed-summary' + (params.toString() ? '?' + params.toString() : ''));
     const payload = await response.json();
@@ -46,9 +45,9 @@ async function loadPacked(force) {
     }
 
     updateDateBounds(payload.dateBounds);
-    fillSelect('filterTurno', payload.filterOptions.turnos);
-    fillSelect('filterZona', payload.filterOptions.zonas);
-    fillSelect('filterHub', payload.filterOptions.hubs);
+    fillMs('Turno', payload.filterOptions.turnos);
+    fillMs('Zona', payload.filterOptions.zonas);
+    fillMs('Hub', payload.filterOptions.hubs);
 
     const range = payload.appliedRange || {};
     const rangeLabel = range.from && range.to
@@ -67,13 +66,75 @@ async function loadPacked(force) {
   }
 }
 
-function fillSelect(id, values) {
-  const sel = document.getElementById(id);
-  const prev = sel.value;
-  sel.innerHTML = '<option value="">Todos</option>';
-  values.forEach(v => { const o = document.createElement('option'); o.value = v; o.textContent = v; sel.appendChild(o); });
-  if (prev && values.includes(prev)) sel.value = prev;
+// ---------- Multi-select (Turno / Zona / Hub) ----------
+
+function fillMs(key, values) {
+  msOptionsCache[key] = values;
+  msState[key] = msState[key].filter(v => values.includes(v));
+  const panel = document.getElementById('ms' + key + 'Panel');
+  const allLabel = key === 'Zona' ? 'Todas' : 'Todos';
+  panel.innerHTML = `
+    <label class="ms-option all">
+      <input type="checkbox" data-ms="${key}" data-all onchange="msToggleAll('${key}')">
+      ${allLabel}
+    </label>
+    ${values.map(v => `
+      <label class="ms-option">
+        <input type="checkbox" data-ms="${key}" value="${escapeHtml(v)}" onchange="msToggleValue('${key}','${escapeHtml(v)}')">
+        ${escapeHtml(v)}
+      </label>
+    `).join('')}
+  `;
+  msSyncChecks(key);
+  msUpdateLabel(key);
 }
+
+function msSyncChecks(key) {
+  const panel = document.getElementById('ms' + key + 'Panel');
+  const selected = msState[key];
+  panel.querySelectorAll(`input[data-ms="${key}"]:not([data-all])`).forEach(cb => {
+    cb.checked = selected.includes(cb.value);
+  });
+  const allCb = panel.querySelector(`input[data-ms="${key}"][data-all]`);
+  if (allCb) allCb.checked = selected.length === 0;
+}
+
+function msUpdateLabel(key) {
+  const btn = document.getElementById('ms' + key + 'Toggle');
+  const selected = msState[key];
+  const allLabel = key === 'Zona' ? 'Todas' : 'Todos';
+  if (!selected.length) btn.textContent = allLabel;
+  else if (selected.length === 1) btn.textContent = selected[0];
+  else btn.textContent = `${selected.length} selecionados`;
+}
+
+function msToggleValue(key, value) {
+  const idx = msState[key].indexOf(value);
+  if (idx >= 0) msState[key].splice(idx, 1); else msState[key].push(value);
+  msSyncChecks(key);
+  msUpdateLabel(key);
+  loadPacked(false);
+}
+
+function msToggleAll(key) {
+  msState[key] = [];
+  msSyncChecks(key);
+  msUpdateLabel(key);
+  loadPacked(false);
+}
+
+function toggleMs(id) {
+  const el = document.getElementById(id);
+  const isOpen = el.classList.contains('open');
+  document.querySelectorAll('.ms.open').forEach(o => o.classList.remove('open'));
+  if (!isOpen) el.classList.add('open');
+}
+
+document.addEventListener('click', e => {
+  document.querySelectorAll('.ms.open').forEach(el => {
+    if (!el.contains(e.target)) el.classList.remove('open');
+  });
+});
 
 function updateDateBounds(bounds) {
   const ini = document.getElementById('filterDataIni');
@@ -86,9 +147,11 @@ function updateDateBounds(bounds) {
 function clearFilters() {
   document.getElementById('filterDataIni').value = '';
   document.getElementById('filterDataFim').value = '';
-  document.getElementById('filterTurno').value = '';
-  document.getElementById('filterZona').value = '';
-  document.getElementById('filterHub').value = '';
+  ['Turno', 'Zona', 'Hub'].forEach(key => {
+    msState[key] = [];
+    msSyncChecks(key);
+    msUpdateLabel(key);
+  });
   loadPacked(false);
 }
 

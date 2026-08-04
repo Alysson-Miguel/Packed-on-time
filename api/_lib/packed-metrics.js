@@ -53,9 +53,12 @@ function finishWeighted(acc) { return acc.weight ? acc.sum / acc.weight : null; 
 function newAcc() { return { sum: 0, weight: 0 }; }
 
 // rows: linhas cruas (array de arrays) da aba "Packed on time".
-// opts: { from, to, turno, zona, hub } — todos opcionais.
+// opts: { from, to, turno, zona, hub } — todos opcionais. turno/zona/hub aceitam
+// string única ou array de valores (filtro OR dentro do mesmo campo).
 function buildPackedStats(rows, headers, opts) {
   const { from, to, turno: turnoFilter, zona: zonaFilter, hub: hubFilter } = opts || {};
+  const toArr = v => (v == null ? null : Array.isArray(v) ? v : [v]);
+  const turnoArr = toArr(turnoFilter), zonaArr = toArr(zonaFilter), hubArr = toArr(hubFilter);
   const idx = buildIndex(headers);
 
   let totalShipments = 0;
@@ -74,9 +77,9 @@ function buildPackedStats(rows, headers, opts) {
     if (!f.data) continue;
     if (from && f.data < from) continue;
     if (to && f.data > to) continue;
-    if (turnoFilter && f.turno !== turnoFilter) continue;
-    if (zonaFilter && f.zona !== zonaFilter) continue;
-    if (hubFilter && f.hub !== hubFilter) continue;
+    if (turnoArr && !turnoArr.includes(f.turno)) continue;
+    if (zonaArr && !zonaArr.includes(f.zona)) continue;
+    if (hubArr && !hubArr.includes(f.hub)) continue;
 
     matched++;
     totalShipments += f.totalShipments;

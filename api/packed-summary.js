@@ -14,9 +14,10 @@ module.exports = async (req, res) => {
 
     const from = (req.query.from || '').slice(0, 10) || null;
     const to = (req.query.to || '').slice(0, 10) || null;
-    const turno = req.query.turno || null;
-    const zona = req.query.zona || null;
-    const hub = req.query.hub || null;
+    const parseMulti = v => (v ? String(v).split(',').map(s => s.trim()).filter(Boolean) : null);
+    const turno = parseMulti(req.query.turno);
+    const zona = parseMulti(req.query.zona);
+    const hub = parseMulti(req.query.hub);
 
     const dataCol = headers.indexOf('data_packed');
     const dates = dataCol >= 0 ? rows.map(r => r[dataCol]).filter(Boolean) : [];

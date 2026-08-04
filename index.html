@@ -39,14 +39,17 @@
   <div class="filter-group"><span class="filter-label">até</span>
     <input type="date" id="filterDataFim" onchange="loadPacked(false)">
   </div>
-  <div class="filter-group"><span class="filter-label">Turno</span>
-    <select id="filterTurno" onchange="loadPacked(false)"><option value="">Todos</option></select>
+  <div class="filter-group ms" id="msTurno"><span class="filter-label">Turno</span>
+    <button type="button" class="ms-toggle" id="msTurnoToggle" onclick="toggleMs('msTurno')">Todos</button>
+    <div class="ms-panel" id="msTurnoPanel"></div>
   </div>
-  <div class="filter-group"><span class="filter-label">Zona</span>
-    <select id="filterZona" onchange="loadPacked(false)"><option value="">Todas</option></select>
+  <div class="filter-group ms" id="msZona"><span class="filter-label">Zona</span>
+    <button type="button" class="ms-toggle" id="msZonaToggle" onclick="toggleMs('msZona')">Todas</button>
+    <div class="ms-panel" id="msZonaPanel"></div>
   </div>
-  <div class="filter-group"><span class="filter-label">Hub</span>
-    <select id="filterHub" onchange="loadPacked(false)"><option value="">Todos</option></select>
+  <div class="filter-group ms" id="msHub"><span class="filter-label">Hub</span>
+    <button type="button" class="ms-toggle" id="msHubToggle" onclick="toggleMs('msHub')">Todos</button>
+    <div class="ms-panel" id="msHubPanel"></div>
   </div>
   <button class="btn-config" onclick="clearFilters()">✕ Limpar</button>
   <button class="btn-refresh" id="btnRefresh" onclick="loadPacked(true)">⟳ Atualizar</button>

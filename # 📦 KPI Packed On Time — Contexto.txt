@@ -5,67 +5,94 @@ Painel visual para apresentação do KPI **Packed On Time** aos Gestores, com us
 
 ---
 
-## Estrutura da Base de Dados
+## Histórico / Evolução
+
+1. **v1 — aba "Detail" (linha a linha).** Painel lia a aba `Detail` da planilha (uma linha por pacote), com cache em Vercel Blob e job de refresh via cron, porque a janela de 10 dias chegava a ~250k linhas. Tinha KPI geral, diagnóstico de processo, por turno, por zona, mapa de calor e drill-down por `br`.
+2. **Fix do OOT.** A coluna `OOT` trazia o valor `"CPT not available"` pra pacotes sem CPT planejado. Esses registros estavam sendo contados como atraso normal, inflando os números (ex: ~211k registros no recorte de um dia). Corrigido para excluir esses pacotes de todos os cálculos de atraso/Out of Time em todo o painel (KPI, gráficos, drill-down, filtros) — não só nos totais isolados.
+3. **Nova aba "Packed on time" (pré-agregada).** Uma segunda aba foi criada na planilha já agregando os dados por **dia × turno × hub × zona** (uma linha por combinação, não por pacote). Muito mais leve que a `Detail` — dá pra ler direto da planilha a cada requisição, sem cache em Blob nem cron.
+4. **Painel "Resumo".** Construído em cima da aba `Packed on time`, com identidade visual própria, para reduzir a carga e a complexidade do painel linha-a-linha.
+5. **Colunas de OOT ignoradas.** As colunas `total_oot`, `total_on_time`, `total_cpt_nao_disponivel` e `pct_oot` da aba `Packed on time` deixaram de ser usadas — o painel passou a se basear só em `total_shipments` (volume) e nos tempos médios (`avg_atraso_min`, `avg_lead_time_h`, `avg_min_no_packing`, `avg_min_no_stage_inbound`). O KPI deixou de ser "% On Time" e passou a ser **atraso médio ponderado**, com ranking de zona/hub/turno por esse atraso.
+6. **Painel "Detalhado" removido.** Com o Resumo estabilizado, a aba `Detail`, o cache em Blob, o cron de refresh e todos os endpoints associados (`sheet-data`, `sheet-summary`, `sheet-heatmap`, `refresh-cache`, `metrics.js`) foram removidos do projeto. O Resumo é hoje a única página do app (`index.html`).
+7. **Redesign minimalista laranja/preto + tema claro/escuro.** Identidade visual redesenhada (fundo preto, um único acento laranja, sem gradientes) com botão de alternância entre tema escuro (padrão) e claro, preferência salva no navegador.
+
+---
+
+## Fonte de Dados Atual — aba `Packed on time`
+
+Cada linha é um agregado por **dia × turno × hub × zona** (não por pacote).
 
 | Campo | Uso | Descrição |
 |---|---|---|
-| `br` | ✅ Ativo | Identificação única do pacote |
-| `hub_destino` | ⏸️ Ignorado | Hub de destino (não considerado por ora) |
-| `received_datetime` | ✅ **Chave** | Data/hora de recebimento do pacote — base para todos os cálculos |
-| `packed_datetime` | ✅ **Chave** | Data/hora em que o pacote finalizou o processo de Packed |
-| `cpt_planejado` | ✅ **Chave** | Data/hora prevista para o Packed — define se está On Time ou não |
-| `turno_ofensor` | ✅ Ativo | Turno que recebeu o pacote e não deu o Packed a tempo |
-| `OOT` | ❌ Ignorado | Ignorado por performance |
-| `atraso_min` | ❌ Ignorado | Ignorado por performance |
-| `atraso_h` | ❌ Ignorado | Ignorado por performance |
-| `zona_stage_inbound` | ❌ Ignorado | Ignorado por performance (por enquanto) |
-| `grupo_stage_inbound` | ✅ **Análise de Zona** | Define qual zona mais ofende o indicador — exibir quantidade e média de tempo |
-| `staging_in_datetime` | ✅ Ativo | Hora de entrada na `grupo_stage_inbound` |
-| `detach_inbound_datetime` | ✅ Ativo | Hora de saída do `grupo_stage_inbound` (exibir `-` quando ausente) |
-| `min_no_packing` | ✅ **Importante** | Tempo em processo de Packing — essencial para análise |
-| `min_no_stage_inbound` | ❌ Ignorado | Ignorado por performance |
-| `horas_no_stage_inbound` | ✅ **Importante** | Tempo que o pacote ficou na zona de Stage Inbound |
-| `total_received_ate_packed_h` | ✅ **Importante** | Tempo total do ciclo: `received_datetime` → `packed_datetime` |
-| `passou_por_stage` | ❌ Ignorado | Ignorado por performance |
+| `data_packed` | ✅ **Chave** | Data do Packed — base do filtro de período e da tendência diária |
+| `turno_ofensor` | ✅ Ativo | Turno associado ao agregado |
+| `hub_destino` | ✅ Ativo | Hub de destino — usado no ranking de ofensores |
+| `zona_classificada` | ✅ Ativo | Zona — usada no ranking de ofensores |
+| `passou_por_stage` | ⏸️ Não usado no painel hoje | "Sim"/"Não" — disponível na planilha, sem filtro dedicado ainda |
+| `total_shipments` | ✅ **Chave** | Volume de pacotes do agregado — base de todo peso (média ponderada) |
+| `total_oot` | ❌ Ignorado | Considerado não confiável nessa aba — decisão explícita de não usar |
+| `total_on_time` | ❌ Ignorado | Idem |
+| `total_cpt_nao_disponivel` | ❌ Ignorado | Idem |
+| `pct_oot` | ❌ Ignorado | Idem — substituído por `avg_atraso_min` como indicador de atraso |
+| `avg_atraso_min` | ✅ **Chave** | Atraso médio (min) do agregado — vira o KPI "Atraso Médio" quando ponderado por `total_shipments` |
+| `avg_atraso_min_oot` | ⏸️ Não usado | Dependia de `total_oot` como peso pra ponderação; descontinuado junto |
+| `avg_lead_time_h` | ✅ **Importante** | Lead time médio: `received_datetime` → `packed_datetime` |
+| `avg_min_no_packing` | ✅ **Importante** | Tempo médio em processo de Packing |
+| `avg_min_no_stage_inbound` | ✅ **Importante** | Tempo médio aguardando stage inbound |
+
+> Números na planilha vêm com vírgula como separador de milhar (ex: `"1,387"`) e ponto como decimal (ex: `"15.7"`) — o parser do painel (`api/_lib/packed-metrics.js`) já trata esse formato.
 
 ---
 
-## Campos Ativos — Resumo Rápido
+## Lógica do KPI Atual
 
-### 🔑 Campos-Chave (definem o KPI)
-- `received_datetime` → ponto de partida do ciclo
-- `packed_datetime` → conclusão do processo
-- `cpt_planejado` → meta/prazo do Packed
+Como a fonte já vem agregada (não há mais `br` individual nem `cpt_planejado`/`packed_datetime` linha a linha nessa aba), o KPI não é mais um booleano On Time/Out of Time por pacote — é uma **média ponderada de atraso**:
 
-> **Lógica do KPI:** Pacote é **On Time** quando `packed_datetime <= cpt_planejado`
-
-### 📊 Campos de Análise
-- `grupo_stage_inbound` → identificar zonas ofensoras (quantidade + média de tempo)
-- `staging_in_datetime` / `detach_inbound_datetime` → permanência na zona
-- `horas_no_stage_inbound` → tempo de espera na zona
-- `min_no_packing` → tempo em processo de Packing
-- `total_received_ate_packed_h` → tempo total do ciclo completo
-
-### 🚨 Campos de Investigação
-- `turno_ofensor` → qual turno gerou o atraso
-- `br` → rastreabilidade individual do pacote
+- Cada linha da planilha contribui com `avg_atraso_min * total_shipments` na soma, e `total_shipments` no peso.
+- O "Atraso Médio" exibido é `soma ponderada / soma dos pesos` sobre o recorte filtrado (data/turno/zona/hub).
+- O mesmo princípio vale para `avg_lead_time_h`, `avg_min_no_packing` e `avg_min_no_stage_inbound`.
+- Ranking de zona/hub/turno = mesmo cálculo, mas agrupado por dimensão, ordenado do maior pro menor atraso médio.
 
 ---
 
-## Visões Planejadas para o Painel
+## Racionais de Decisão
 
-1. **KPI Geral** — % Packed On Time (volume total On Time vs Total)
-2. **Por Turno** — `turno_ofensor` → quais turnos mais geram atraso
-3. **Por Zona** — `grupo_stage_inbound` → zonas com mais ocorrências e maior tempo médio
-4. **Tempo de Ciclo** — distribuição do `total_received_ate_packed_h`
-5. **Tempo no Packing** — análise do `min_no_packing`
-6. **Tempo na Zona** — análise do `horas_no_stage_inbound`
-7. **Drill-down por Pacote** — consulta individual via `br`
+- **Por que abandonar a aba `Detail`?** Volume alto (~250k linhas na janela de 10 dias) exigia cache em Blob + cron só pra manter o painel utilizável, e a coluna `OOT` já tinha se mostrado propensa a inconsistência (`"CPT not available"` inflando contagem). A aba pré-agregada resolve os dois problemas de uma vez.
+- **Por que ignorar `total_oot`/`total_on_time`/`total_cpt_nao_disponivel`/`pct_oot`?** Decisão explícita do usuário — esses campos na aba `Packed on time` não são a fonte de verdade adotada pro indicador de atraso; `avg_atraso_min` ponderado por volume cumpre esse papel.
+- **Por que atraso médio em vez de % On Time?** Consequência direta da decisão acima: sem contagem confiável de OOT/On Time, a métrica de atraso passou a ser o indicador central do painel.
+- **Por que sem cache/cron no endpoint `packed-summary`?** O volume da aba agregada é pequeno o bastante pra ler direto da planilha a cada requisição sem custo perceptível — simplicidade em vez de infraestrutura de cache.
+
+---
+
+## Arquitetura do Painel (estado atual)
+
+- **Fonte:** Google Sheets, aba `Packed on time`, lida via Service Account (`api/_lib/sheet.js` → `fetchPackedSummaryRows`).
+- **Agregação:** `api/_lib/packed-metrics.js` (`buildPackedStats`) — soma volume e pondera as médias sobre o recorte pedido (from/to/turno/zona/hub), sem iterar pacote a pacote.
+- **Endpoint:** `api/packed-summary.js` — único endpoint do backend, sem cache.
+- **Front-end:** `index.html` + `assets/js/app.js` + `assets/css/style.css` — página única, tema claro/escuro via `data-theme` no `<html>` e preferência salva em `localStorage`.
+
+---
+
+## Visões Implementadas no Painel
+
+1. **KPI Geral** — Total de pacotes, Atraso Médio, Lead Time Médio, Packing Médio, Stage Inbound Médio.
+2. **Insights Automáticos** — resumo do período, concentração do atraso nas piores zonas (top 3 + % de volume), zona/hub/turno com maior atraso médio (com delta % vs. média geral), quão espalhado está o problema (volume acima da média geral), pior dia do período.
+3. **Tendência de Atraso Médio** — atraso médio por dia (linha).
+4. **Por Turno** — volume de pacotes e atraso médio, em dois gráficos lado a lado (nunca eixo duplo no mesmo gráfico).
+5. **Ranking por Atraso Médio** — top 12 zonas e top 12 hubs, ordenados do maior pro menor atraso médio.
+
+Filtros disponíveis: período (`data_packed`), turno, zona, hub.
+
+---
+
+## Tema Visual
+
+- Minimalista, preto e laranja (`#f97316`) como único acento cromático — sem gradientes, sem paleta arco-íris.
+- Alternância entre escuro (padrão) e claro via botão no cabeçalho; gráficos recalculam grid/tooltip/cor de texto conforme o tema ativo.
+- Texto em laranja usa uma variante mais escura no tema claro (`--accent-ink`) pra manter contraste legível — cor de preenchimento (`--accent`) e cor de texto (`--accent-ink`) são variáveis CSS separadas por esse motivo.
 
 ---
 
 ## Próximos Passos
-- [ ] Receber/carregar a base de dados
-- [ ] Construir o painel visual interativo
-- [ ] Definir período padrão de visualização (dia/semana/mês)
-- [ ] Validar lógica do KPI com o usuário
+- [ ] Validar com os gestores se o atraso médio ponderado substitui bem o % On Time como indicador principal
+- [ ] Avaliar se `passou_por_stage` vira filtro no painel
+- [ ] Definir se drill-down por pacote individual (`br`) ainda é necessário, e se sim, como reintroduzi-lo sem voltar ao custo da aba `Detail`
