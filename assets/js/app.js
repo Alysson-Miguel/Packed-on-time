@@ -1,4 +1,4 @@
-let stats = null, charts = {};
+let stats = null, pot = null, charts = {};
 const msState = { Turno: [], Zona: [], Hub: [] };
 const msOptionsCache = { Turno: '', Zona: '', Hub: '' };
 const MS_KEYS = ['Turno', 'Zona', 'Hub'];
@@ -8,6 +8,8 @@ const state = { estacao: '', estacoes: [], dateBounds: null };
 const rankSort = { zona: 'atraso', hub: 'atraso' };
 const rankExpanded = { zona: false, hub: false };
 const RANK_LIMIT = 12;
+// Granularidade do gráfico de % POT: null = automática (dia até 31 dias, senão semana).
+let potGran = null;
 
 if (typeof ChartDataLabels !== 'undefined') Chart.register(ChartDataLabels);
 
@@ -112,7 +114,8 @@ async function loadPacked(force) {
       return;
     }
 
-    updateDateBounds(payload.dateBounds);
+    pot = payload.pot || null;
+    updateDateBounds(payload.dateBounds, pot && pot.dateBounds);
     fillMs('Turno', payload.filterOptions.turnos);
     fillMs('Zona', payload.filterOptions.zonas);
     fillMs('Hub', payload.filterOptions.hubs);
@@ -322,14 +325,17 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanels(
 
 // ---------- Período ----------
 
-function updateDateBounds(bounds) {
+// Os presets usam o intervalo da aba "Packed on time" (a mais curta); os campos de
+// data aceitam também o histórico mais longo da db_pot, que alimenta o % POT.
+function updateDateBounds(bounds, potBounds) {
   state.dateBounds = bounds;
   const ini = document.getElementById('filterDataIni');
   const fim = document.getElementById('filterDataFim');
-  if (!bounds) { ini.removeAttribute('min'); ini.removeAttribute('max'); fim.removeAttribute('min'); fim.removeAttribute('max'); }
+  const all = [bounds, potBounds].filter(Boolean);
+  if (!all.length) { ini.removeAttribute('min'); ini.removeAttribute('max'); fim.removeAttribute('min'); fim.removeAttribute('max'); }
   else {
-    ini.min = fim.min = bounds.min;
-    ini.max = fim.max = bounds.max;
+    ini.min = fim.min = all.map(b => b.min).sort()[0];
+    ini.max = fim.max = all.map(b => b.max).sort().pop();
   }
   syncPresets();
 }
@@ -422,12 +428,15 @@ function fmtH(h) {
   if (abs < 24) return h.toFixed(1) + 'h';
   return (h / 24).toFixed(1) + 'd';
 }
+function fmtPct(v) { return v === null || v === undefined || isNaN(v) ? '—' : (v * 100).toFixed(1).replace('.', ',') + '%'; }
+function fmtInt(n) { return n === null || n === undefined ? '—' : n.toLocaleString('pt-BR'); }
 function fmtDate(iso) { return iso.split('-').reverse().join('/'); }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 // ---------- Render ----------
 
 function renderAll(s) {
+  renderPot(pot);
   renderKPIs(s);
   renderInsights(s);
   renderEstacaoSection(s);
@@ -459,6 +468,15 @@ function renderInsights(s) {
   const items = [];
   const { topOfensorZona, topOfensorHub, topOfensorTurno } = s.insights;
   const overall = s.avgAtrasoMin;
+
+  if (pot && !pot.error && pot.pct !== null) {
+    const fora = pot.outTime + pot.cptNa;
+    items.push(`<strong>% POT de ${fmtPct(pot.pct)}</strong>: os pedidos fora do prazo equivalem a <strong>${fmtPct(1 - pot.pct)}</strong> do On time (${fmtInt(fora)} pedidos — ${fmtInt(pot.outTime)} Out time e ${fmtInt(pot.cptNa)} sem CPT).`);
+    const potEst = (pot.porEstacao || []).filter(e => e.pct !== null);
+    if (!state.estacao && potEst.length > 1) {
+      items.push(`Pior % POT entre as estações: <strong>${escapeHtml(splitStation(potEst[0].estacao).name)}</strong> com <strong>${fmtPct(potEst[0].pct)}</strong>.`);
+    }
+  }
 
   items.push(`<strong>${s.total.toLocaleString('pt-BR')}</strong> pacotes no período, com atraso médio geral de <strong>${fmtMin(overall)}</strong> e lead time médio de <strong>${fmtH(s.avgLeadTimeH)}</strong>.`);
 
@@ -557,6 +575,118 @@ function chartOpts(extra) {
     },
     ...extra
   };
+}
+
+// ---------- % POT (aba db_pot) ----------
+
+// A db_pot só tem dia × estação × status: os filtros de turno/zona/hub não se
+// aplicam a ela — o cabeçalho da seção avisa quando algum estiver ativo.
+function renderPot(p) {
+  const err = document.getElementById('potError');
+  err.hidden = !(p && p.error);
+  if (p && p.error) err.textContent = 'Não foi possível ler a aba db_pot: ' + p.error;
+  const ok = p && !p.error;
+
+  document.getElementById('kpiPotPct').textContent = ok ? fmtPct(p.pct) : '—';
+  document.getElementById('kpiPotOn').textContent = ok ? fmtInt(p.onTime) : '—';
+  document.getElementById('kpiPotOut').textContent = ok ? fmtInt(p.outTime) : '—';
+  document.getElementById('kpiPotCpt').textContent = ok ? fmtInt(p.cptNa) : '—';
+  document.getElementById('kpiPotTotal').textContent = ok ? fmtInt(p.total) : '—';
+  const share = v => (ok && p.total ? `${fmtPct(v / p.total)} do total` : '');
+  document.getElementById('kpiPotOnSub').textContent = share(ok ? p.onTime : 0) || 'Pedidos no prazo';
+  document.getElementById('kpiPotOutSub').textContent = share(ok ? p.outTime : 0) || 'Pedidos fora do prazo';
+  document.getElementById('kpiPotCptSub').textContent = share(ok ? p.cptNa : 0) || 'Sem CPT planejado';
+
+  const dias = ok ? p.porDia : [];
+  const range = dias.length ? (dias.length === 1 ? fmtDate(dias[0].periodo) : `${fmtDate(dias[0].periodo)} a ${fmtDate(dias[dias.length - 1].periodo)}`) : '';
+  const ignored = MS_KEYS.some(k => msState[k].length) ? ' · não filtra por turno/zona/hub' : '';
+  document.getElementById('potRange').textContent = range + ignored;
+
+  const gran = potGran || (dias.length > 31 ? 'semana' : 'dia');
+  document.querySelectorAll('#potGran button').forEach(b => b.classList.toggle('active', b.dataset.gran === gran));
+  const serie = !ok ? [] : gran === 'mes' ? p.porMes : gran === 'semana' ? p.porSemana : p.porDia;
+  const label = per => {
+    if (gran === 'mes') { const [y, m] = per.split('-'); return `${m}/${y}`; }
+    return (gran === 'semana' ? 'sem ' : '') + per.slice(5).split('-').reverse().join('/');
+  };
+  renderPotChart(serie, label);
+
+  const estacoes = ok ? p.porEstacao || [] : [];
+  const showEst = !state.estacao && estacoes.length > 1;
+  document.getElementById('potEstacaoCard').hidden = !showEst;
+  document.getElementById('potTrendCard').classList.toggle('full', !showEst);
+  if (showEst) renderPotEstacoes(estacoes, p.pct);
+}
+
+function setPotGran(gran) {
+  potGran = gran;
+  renderPot(pot);
+}
+
+function renderPotChart(serie, label) {
+  destroyChart('chartPot');
+  const p = chartPalette();
+  const base = chartOpts();
+  charts.chartPot = new Chart(document.getElementById('chartPot'), {
+    type: 'line',
+    data: {
+      labels: serie.map(d => label(d.periodo)),
+      datasets: [{
+        label: '% POT',
+        data: serie.map(d => (d.pct === null ? null : +(d.pct * 100).toFixed(2))),
+        borderColor: p.orange,
+        backgroundColor: p.orangeFill,
+        borderWidth: 2,
+        fill: true,
+        tension: .25,
+        pointBackgroundColor: p.orange,
+        pointBorderWidth: 0,
+        pointRadius: serie.length > 60 ? 0 : 3,
+        pointHoverRadius: 5
+      }]
+    },
+    options: {
+      ...base,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        ...base.plugins,
+        tooltip: {
+          ...base.plugins.tooltip,
+          callbacks: {
+            label: ctx => `% POT: ${fmtPct(serie[ctx.dataIndex].pct)}`,
+            afterLabel: ctx => {
+              const d = serie[ctx.dataIndex];
+              return [`On time: ${fmtInt(d.onTime)}`, `Out time: ${fmtInt(d.outTime)}`, `CPT n/a: ${fmtInt(d.cptNa)}`];
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ...base.scales.x, ticks: { ...base.scales.x.ticks, autoSkip: true, maxTicksLimit: 14, maxRotation: 0 } },
+        y: { ...base.scales.y, beginAtZero: false, suggestedMax: 100, ticks: { ...base.scales.y.ticks, callback: v => v + '%' } }
+      }
+    }
+  });
+}
+
+function renderPotEstacoes(rows, overall) {
+  const max = Math.max(...rows.map(r => r.pct || 0), 0.0001);
+  const total = rows.reduce((sum, r) => sum + r.total, 0);
+  document.getElementById('rankPotEstacao').innerHTML = `
+    <div class="rank-row rank-head"><div></div><div>Estação</div><div class="rv">% POT</div><div class="rv">Pedidos · %</div></div>
+    ${rows.map((r, i) => {
+      const st = splitStation(r.estacao);
+      return `
+      <button type="button" class="rank-row clickable" data-value="${escapeHtml(r.estacao)}" onclick="selectStation(this.dataset.value)">
+        <div class="rpos">${i + 1}</div>
+        <div class="rmain">
+          <div class="rn" title="${escapeHtml(r.estacao)}">${escapeHtml(st.name)}<span class="rsub">${escapeHtml(st.meta)}</span></div>
+          <div class="rbar"><span style="width:${((r.pct || 0) / max) * 100}%"></span></div>
+        </div>
+        <div class="rv${overall !== null && r.pct < overall ? ' hot' : ''}">${fmtPct(r.pct)}</div>
+        <div class="rv">${fmtInt(r.total)}<span class="rpct">${total ? fmtPct(r.total / total) : ''}</span></div>
+      </button>`;
+    }).join('')}`;
 }
 
 // Tendência é a única série contínua do painel — linha fina, ponto discreto,

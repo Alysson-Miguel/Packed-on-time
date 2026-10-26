@@ -78,7 +78,34 @@
     <div class="chips" id="activeChips"></div>
   </div>
 
-  <div class="section-title">KPI Geral</div>
+  <div class="section-title">% POT <span class="section-note" id="potRange"></span></div>
+  <div class="pot-error" id="potError" hidden></div>
+  <div class="kpi-grid">
+    <div class="kpi-card accent hero"><div class="kpi-label">% POT · Packed On Time</div><div class="kpi-value" id="kpiPotPct">—</div><div class="kpi-sub">(On time − (CPT n/a + Out time)) ÷ On time</div></div>
+    <div class="kpi-card"><div class="kpi-label">On time</div><div class="kpi-value" id="kpiPotOn">—</div><div class="kpi-sub" id="kpiPotOnSub">Pedidos no prazo</div></div>
+    <div class="kpi-card"><div class="kpi-label">Out time</div><div class="kpi-value" id="kpiPotOut">—</div><div class="kpi-sub" id="kpiPotOutSub">Pedidos fora do prazo</div></div>
+    <div class="kpi-card"><div class="kpi-label">CPT not available</div><div class="kpi-value" id="kpiPotCpt">—</div><div class="kpi-sub" id="kpiPotCptSub">Sem CPT planejado</div></div>
+    <div class="kpi-card"><div class="kpi-label">Total de Pedidos</div><div class="kpi-value" id="kpiPotTotal">—</div><div class="kpi-sub">Aba db_pot</div></div>
+  </div>
+  <div class="charts-row" style="margin-top:14px">
+    <div class="chart-card" id="potTrendCard">
+      <div class="chart-header">
+        <span class="chart-title">% POT ao longo do tempo</span>
+        <div class="seg seg-sm" id="potGran">
+          <button type="button" data-gran="dia" onclick="setPotGran('dia')">Dia</button>
+          <button type="button" data-gran="semana" onclick="setPotGran('semana')">Semana</button>
+          <button type="button" data-gran="mes" onclick="setPotGran('mes')">Mês</button>
+        </div>
+      </div>
+      <div class="chart-canvas"><canvas id="chartPot"></canvas></div>
+    </div>
+    <div class="table-card" id="potEstacaoCard">
+      <div class="table-header"><span class="chart-title">% POT por estação</span><span class="chart-badge">clique para abrir a estação</span></div>
+      <div id="rankPotEstacao" class="rank-list"></div>
+    </div>
+  </div>
+
+  <div class="section-title">Tempos e Volume <span class="section-note">aba Packed on time</span></div>
   <div class="kpi-grid">
     <div class="kpi-card"><div class="kpi-label">Total de Pacotes</div><div class="kpi-value" id="kpiTotal">—</div><div class="kpi-sub">No período filtrado</div></div>
     <div class="kpi-card accent"><div class="kpi-label">Atraso Médio</div><div class="kpi-value" id="kpiAvgAtraso">—</div><div class="kpi-sub">Packed vs. CPT Planejado</div></div>

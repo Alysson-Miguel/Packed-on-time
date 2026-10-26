@@ -81,6 +81,11 @@ select:hover,input:hover,select:focus,input:focus{border-color:var(--accent)}
 .section-title{font-size:12px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--text-muted);margin-bottom:14px;margin-top:40px;display:flex;align-items:center;gap:10px}
 .main>.section-title:first-child{margin-top:0}
 .section-title::after{content:'';flex:1;height:1px;background:var(--border)}
+.section-note{font-size:11px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--text-muted);font-family:'JetBrains Mono',monospace}
+.kpi-card.hero{background:var(--surface2)}
+.kpi-card.hero .kpi-value{font-size:32px}
+.pot-error{background:var(--surface);border:1px solid var(--red);color:var(--red);border-radius:10px;padding:11px 20px;font-size:12px;margin-bottom:14px}
+.table-card[hidden],.chart-card[hidden]{display:none}
 
 .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1px;background:var(--border);border:1px solid var(--border);border-radius:10px;overflow:hidden}
 .kpi-card{background:var(--surface);padding:20px}
@@ -108,7 +113,7 @@ select:hover,input:hover,select:focus,input:focus{border-color:var(--accent)}
 .insights-list strong{color:var(--text);font-weight:600}
 
 .rank-list{display:flex;flex-direction:column;gap:1px;background:var(--border)}
-.rank-row{display:grid;grid-template-columns:22px minmax(0,1fr) 80px 120px;align-items:center;gap:14px;padding:11px 20px;background:var(--surface);border:none;width:100%;text-align:left;font-family:inherit;color:inherit}
+.rank-row{display:grid;grid-template-columns:22px minmax(0,1fr) 80px 150px;align-items:center;gap:14px;padding:11px 20px;background:var(--surface);border:none;width:100%;text-align:left;font-family:inherit;color:inherit}
 .rank-row.rank-head{padding:8px 20px;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px}
 .rank-row.rank-head .rv{font-family:'Inter',sans-serif;font-size:10px;color:var(--text-muted)}
 .rank-row.clickable{cursor:pointer;transition:background .15s}
