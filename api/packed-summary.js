@@ -1,12 +1,13 @@
 const { fetchPackedSummaryRows } = require('./_lib/sheet');
-const { buildPackedStats } = require('./_lib/packed-metrics');
+const { buildPackedStats, buildFilterOptions } = require('./_lib/packed-metrics');
 
-// Painel "Resumo" — lê a aba "Packed on time" (já agregada por dia/turno/hub/zona)
-// direto da planilha a cada chamada. Sem cache em Blob: o volume de linhas dessa
-// aba é pequeno o bastante (uma linha por combinação, não por pacote).
+// Painel "Resumo" — lê a aba "Packed on time" (já agregada por dia/turno/hub/zona/
+// estação). A leitura da planilha tem um cache curto em memória (ver sheet.js);
+// force=1 ignora o cache.
 module.exports = async (req, res) => {
   try {
-    const { headers, rows } = await fetchPackedSummaryRows();
+    const force = req.query.force === '1';
+    const { headers, rows, fetchedAt } = await fetchPackedSummaryRows({ force });
     if (!headers.length) {
       res.status(200).json({ stats: null, notice: 'Aba "Packed on time" vazia ou não encontrada.' });
       return;
@@ -15,25 +16,19 @@ module.exports = async (req, res) => {
     const from = (req.query.from || '').slice(0, 10) || null;
     const to = (req.query.to || '').slice(0, 10) || null;
     const parseMulti = v => (v ? String(v).split(',').map(s => s.trim()).filter(Boolean) : null);
+    const estacao = parseMulti(req.query.estacao);
     const turno = parseMulti(req.query.turno);
     const zona = parseMulti(req.query.zona);
     const hub = parseMulti(req.query.hub);
 
-    const dataCol = headers.indexOf('data_packed');
-    const dates = dataCol >= 0 ? rows.map(r => r[dataCol]).filter(Boolean) : [];
-    const dateBounds = dates.length ? { min: dates.reduce((a, b) => (b < a ? b : a)), max: dates.reduce((a, b) => (b > a ? b : a)) } : null;
-
-    const turnos = [...new Set(rows.map(r => r[headers.indexOf('turno_ofensor')]).filter(Boolean))].sort();
-    const zonas = [...new Set(rows.map(r => r[headers.indexOf('zona_classificada')]).filter(Boolean))].sort();
-    const hubs = [...new Set(rows.map(r => r[headers.indexOf('hub_destino')]).filter(Boolean))].sort();
-
-    const stats = buildPackedStats(rows, headers, { from, to, turno, zona, hub });
+    const { dateBounds, options } = buildFilterOptions(rows, headers, estacao);
+    const stats = buildPackedStats(rows, headers, { from, to, estacao, turno, zona, hub });
 
     res.status(200).json({
-      lastUpdate: new Date().toISOString(),
+      lastUpdate: fetchedAt,
       dateBounds,
       appliedRange: { from: from || (dateBounds && dateBounds.min), to: to || (dateBounds && dateBounds.max) },
-      filterOptions: { turnos, zonas, hubs },
+      filterOptions: options,
       stats
     });
   } catch (err) {

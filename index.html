@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Packed On Time — Resumo</title>
-<script>(function(){var t=localStorage.getItem('pot-theme')||'dark';document.documentElement.setAttribute('data-theme',t);})();</script>
+<script>(function(){var t='dark';try{t=localStorage.getItem('pot-theme')||'dark';}catch(e){}document.documentElement.setAttribute('data-theme',t);})();</script>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <link rel="stylesheet" href="assets/css/style.css">
@@ -12,6 +12,7 @@
 <body>
 
 <div class="loader" id="loader"><div class="loader-ring"></div><p id="loaderMsg">Carregando...</p></div>
+<div class="progress" id="progress"></div>
 
 <header>
   <div class="header-left">
@@ -20,25 +21,41 @@
       <h1>Packed On Time</h1>
       <p>Resumo agregado · dia · turno · hub · zona</p>
     </div>
+    <div class="station" id="station">
+      <button type="button" class="station-toggle" id="stationToggle" onclick="toggleStation()" aria-haspopup="listbox">
+        <span class="station-meta" id="stationMeta">Estação</span>
+        <span class="station-name" id="stationName">Todas as estações</span>
+      </button>
+      <div class="station-panel" id="stationPanel">
+        <input type="search" class="panel-search" id="stationSearch" placeholder="Buscar estação..." oninput="renderStationList()" onkeydown="stationSearchKey(event)">
+        <div class="station-list" id="stationList" role="listbox"></div>
+      </div>
+    </div>
   </div>
   <div class="header-right">
-    <button class="btn-theme" id="themeToggle" onclick="toggleTheme()">—</button>
     <div class="last-update">
-      <div class="label">Última Atualização</div>
+      <div class="label">Dados lidos em</div>
       <div class="value" id="lastUpdate">—</div>
     </div>
-    <div class="live-dot" id="liveDot"><div class="pulse"></div><span id="liveLabel">Live</span></div>
+    <button class="btn-theme" id="themeToggle" onclick="toggleTheme()">—</button>
+    <button class="btn-refresh" id="btnRefresh" onclick="loadPacked(true)" title="Relê a planilha ignorando o cache">⟳ Atualizar</button>
   </div>
 </header>
 
 <div class="filters-bar">
-  <span class="filter-label">Filtros:</span>
-  <div class="filter-group"><span class="filter-label">Packed de</span>
-    <input type="date" id="filterDataIni" onchange="loadPacked(false)">
+  <div class="filter-group">
+    <span class="filter-label">Período</span>
+    <div class="seg" id="datePresets">
+      <button type="button" data-preset="1" onclick="applyPreset(1)">Último dia</button>
+      <button type="button" data-preset="3" onclick="applyPreset(3)">3 dias</button>
+      <button type="button" data-preset="7" onclick="applyPreset(7)">7 dias</button>
+      <button type="button" data-preset="0" onclick="applyPreset(0)">Tudo</button>
+    </div>
+    <input type="date" id="filterDataIni" onchange="onDateChange()" aria-label="Packed de">
+    <span class="filter-label">até</span>
+    <input type="date" id="filterDataFim" onchange="onDateChange()" aria-label="Packed até">
   </div>
-  <div class="filter-group"><span class="filter-label">até</span>
-    <input type="date" id="filterDataFim" onchange="loadPacked(false)">
-  </div>
+  <div class="filter-sep"></div>
   <div class="filter-group ms" id="msTurno"><span class="filter-label">Turno</span>
     <button type="button" class="ms-toggle" id="msTurnoToggle" onclick="toggleMs('msTurno')">Todos</button>
     <div class="ms-panel" id="msTurnoPanel"></div>
@@ -51,13 +68,15 @@
     <button type="button" class="ms-toggle" id="msHubToggle" onclick="toggleMs('msHub')">Todos</button>
     <div class="ms-panel" id="msHubPanel"></div>
   </div>
-  <button class="btn-config" onclick="clearFilters()">✕ Limpar</button>
-  <button class="btn-refresh" id="btnRefresh" onclick="loadPacked(true)">⟳ Atualizar</button>
+  <button class="btn-config" id="btnClear" onclick="clearFilters()">✕ Limpar filtros</button>
 </div>
 
-<div class="main">
+<div class="main" id="main">
 
-  <div class="status-bar" id="statusBar"><span>●</span><span id="statusText">Carregando dados...</span></div>
+  <div class="context-bar">
+    <div class="status-bar" id="statusBar"><span>●</span><span id="statusText">Carregando dados...</span></div>
+    <div class="chips" id="activeChips"></div>
+  </div>
 
   <div class="section-title">KPI Geral</div>
   <div class="kpi-grid">
@@ -71,6 +90,14 @@
   <div class="section-title">Insights Automáticos</div>
   <div class="table-card" style="padding:18px 20px">
     <ul class="insights-list" id="insightsList"><li>Carregando...</li></ul>
+  </div>
+
+  <div id="estacaoSection" hidden>
+    <div class="section-title">Comparativo por Estação</div>
+    <div class="table-card">
+      <div class="table-header"><span class="chart-title">Atraso médio por estação</span><span class="chart-badge">clique para abrir a estação</span></div>
+      <div id="rankEstacao" class="rank-list"></div>
+    </div>
   </div>
 
   <div class="section-title">Tendência de Atraso Médio</div>
@@ -93,14 +120,26 @@
     </div>
   </div>
 
-  <div class="section-title">Ranking por Atraso Médio</div>
+  <div class="section-title">Ranking</div>
   <div class="charts-row">
     <div class="table-card">
-      <div class="table-header"><span class="chart-title">Por Zona</span><span class="chart-badge">Top 12</span></div>
+      <div class="table-header">
+        <span class="chart-title">Por Zona</span>
+        <div class="seg seg-sm" data-rank="zona">
+          <button type="button" data-sort="atraso" onclick="setRankSort('zona','atraso')">Atraso</button>
+          <button type="button" data-sort="volume" onclick="setRankSort('zona','volume')">Volume</button>
+        </div>
+      </div>
       <div id="rankZona" class="rank-list"></div>
     </div>
     <div class="table-card">
-      <div class="table-header"><span class="chart-title">Por Hub</span><span class="chart-badge">Top 12</span></div>
+      <div class="table-header">
+        <span class="chart-title">Por Hub</span>
+        <div class="seg seg-sm" data-rank="hub">
+          <button type="button" data-sort="atraso" onclick="setRankSort('hub','atraso')">Atraso</button>
+          <button type="button" data-sort="volume" onclick="setRankSort('hub','volume')">Volume</button>
+        </div>
+      </div>
       <div id="rankHub" class="rank-list"></div>
     </div>
   </div>

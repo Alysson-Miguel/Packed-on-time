@@ -1,9 +1,19 @@
 let stats = null, charts = {};
 const msState = { Turno: [], Zona: [], Hub: [] };
-const msLabels = { Turno: 'Todos', Zona: 'Todas', Hub: 'Todos' };
-const msOptionsCache = { Turno: [], Zona: [], Hub: [] };
+const msOptionsCache = { Turno: '', Zona: '', Hub: '' };
+const MS_KEYS = ['Turno', 'Zona', 'Hub'];
+
+// Estação é o "contexto" do painel (fica no header, não nos filtros): '' = todas.
+const state = { estacao: '', estacoes: [], dateBounds: null };
+const rankSort = { zona: 'atraso', hub: 'atraso' };
+const rankExpanded = { zona: false, hub: false };
+const RANK_LIMIT = 12;
 
 if (typeof ChartDataLabels !== 'undefined') Chart.register(ChartDataLabels);
+
+// localStorage pode lançar (aba anônima, site data bloqueado) — nunca é essencial.
+function storeGet(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+function storeSet(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* ignora */ } }
 
 // ---------- Tema ----------
 
@@ -11,28 +21,79 @@ function currentTheme() { return document.documentElement.getAttribute('data-the
 
 function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
-  localStorage.setItem('pot-theme', theme);
+  storeSet('pot-theme', theme);
   document.getElementById('themeToggle').textContent = theme === 'dark' ? '☀ Claro' : '☾ Escuro';
   if (stats) renderAll(stats); // recoloca os gráficos com a paleta do novo tema
 }
 
 function toggleTheme() { applyTheme(currentTheme() === 'dark' ? 'light' : 'dark'); }
 
-async function loadPacked(force) {
-  const btn = document.getElementById('btnRefresh');
-  btn.disabled = true; btn.textContent = '⟳ Buscando...';
-  showLoader('Carregando resumo agregado...');
-  try {
-    const from = document.getElementById('filterDataIni').value;
-    const to = document.getElementById('filterDataFim').value;
-    const params = new URLSearchParams();
-    if (from) params.set('from', from);
-    if (to) params.set('to', to);
-    if (msState.Turno.length) params.set('turno', msState.Turno.join(','));
-    if (msState.Zona.length) params.set('zona', msState.Zona.join(','));
-    if (msState.Hub.length) params.set('hub', msState.Hub.join(','));
+// ---------- Carga ----------
 
-    const response = await fetch('/api/packed-summary' + (params.toString() ? '?' + params.toString() : ''));
+// Cada clique em filtro agenda uma carga com debounce; se uma requisição antiga
+// ainda estiver em voo, ela é abortada — só a resposta mais recente é renderizada.
+let loadTimer = null, inflight = null, reqSeq = 0, firstLoad = true;
+
+function scheduleLoad() {
+  clearTimeout(loadTimer);
+  loadTimer = setTimeout(() => loadPacked(false), 250);
+}
+
+function currentParams() {
+  const params = new URLSearchParams();
+  const from = document.getElementById('filterDataIni').value;
+  const to = document.getElementById('filterDataFim').value;
+  if (state.estacao) params.set('estacao', state.estacao);
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  if (msState.Turno.length) params.set('turno', msState.Turno.join(','));
+  if (msState.Zona.length) params.set('zona', msState.Zona.join(','));
+  if (msState.Hub.length) params.set('hub', msState.Hub.join(','));
+  return params;
+}
+
+// O recorte atual vai pra URL, então dá pra compartilhar o link de uma visão.
+function syncUrl(params) {
+  const qs = params.toString();
+  history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
+}
+
+function restoreFromUrl() {
+  const q = new URLSearchParams(location.search);
+  const split = v => (v ? v.split(',').map(s => s.trim()).filter(Boolean) : []);
+  state.estacao = q.has('estacao') ? q.get('estacao') : (storeGet('pot-estacao') || '');
+  document.getElementById('filterDataIni').value = q.get('from') || '';
+  document.getElementById('filterDataFim').value = q.get('to') || '';
+  msState.Turno = split(q.get('turno'));
+  msState.Zona = split(q.get('zona'));
+  msState.Hub = split(q.get('hub'));
+}
+
+function setLoading(on) {
+  const btn = document.getElementById('btnRefresh');
+  btn.disabled = on;
+  btn.textContent = on ? '⟳ Buscando...' : '⟳ Atualizar';
+  if (firstLoad) {
+    if (on) showLoader('Carregando resumo agregado...'); else hideLoader();
+    return;
+  }
+  document.getElementById('progress').classList.toggle('active', on);
+  document.getElementById('main').classList.toggle('is-loading', on);
+}
+
+async function loadPacked(force) {
+  clearTimeout(loadTimer);
+  if (inflight) inflight.abort();
+  const ctrl = new AbortController();
+  inflight = ctrl;
+  const seq = ++reqSeq;
+  setLoading(true);
+  try {
+    const params = currentParams();
+    syncUrl(params);
+    if (force) params.set('force', '1');
+
+    const response = await fetch('/api/packed-summary' + (params.toString() ? '?' + params.toString() : ''), { signal: ctrl.signal });
     const payload = await response.json();
     if (payload.error) throw new Error(payload.error);
 
@@ -44,49 +105,158 @@ async function loadPacked(force) {
       return;
     }
 
+    fillStations(payload.filterOptions.estacoes);
+    if (state.estacao && !state.estacoes.includes(state.estacao)) {
+      // Estação salva/compartilhada que não existe mais na base: volta pro consolidado.
+      selectStation('');
+      return;
+    }
+
     updateDateBounds(payload.dateBounds);
     fillMs('Turno', payload.filterOptions.turnos);
     fillMs('Zona', payload.filterOptions.zonas);
     fillMs('Hub', payload.filterOptions.hubs);
+    renderChips();
 
     const range = payload.appliedRange || {};
     const rangeLabel = range.from && range.to
-      ? (range.from === range.to ? range.from.split('-').reverse().join('/') : `${range.from.split('-').reverse().join('/')} a ${range.to.split('-').reverse().join('/')}`)
+      ? (range.from === range.to ? fmtDate(range.from) : `${fmtDate(range.from)} a ${fmtDate(range.to)}`)
       : 'janela completa';
-    setStatus('ok', `Conectado à aba "Packed on time". ${payload.stats.total.toLocaleString('pt-BR')} pacotes agregados (${rangeLabel}).`);
+    const stationLabel = state.estacao ? splitStation(state.estacao).name : `${state.estacoes.length} estações`;
+    setStatus('ok', `${payload.stats.total.toLocaleString('pt-BR')} pacotes · ${stationLabel} · ${rangeLabel}`);
 
     stats = payload.stats;
     renderAll(stats);
   } catch (err) {
+    if (err.name === 'AbortError') return;
     console.error(err);
     setStatus('err', 'Erro ao carregar dados: ' + err.message);
   } finally {
-    hideLoader();
-    btn.disabled = false; btn.textContent = '⟳ Atualizar';
+    if (seq === reqSeq) {
+      inflight = null;
+      setLoading(false);
+      firstLoad = false;
+    }
   }
+}
+
+// ---------- Estação ----------
+
+// "SoC_PE_Jaboatão dos Guararapes" → { meta: "SoC · PE", name: "Jaboatão dos Guararapes" }.
+// Nomes fora do padrão TIPO_UF_NOME aparecem inteiros.
+function splitStation(value) {
+  const parts = String(value).split('_');
+  if (parts.length < 3) return { meta: 'Estação', name: value };
+  return { meta: `${parts[0]} · ${parts[1]}`, name: parts.slice(2).join(' ') };
+}
+
+function fillStations(values) {
+  state.estacoes = values || [];
+  updateStationLabel();
+  renderStationList();
+}
+
+function updateStationLabel() {
+  const meta = document.getElementById('stationMeta');
+  const name = document.getElementById('stationName');
+  if (!state.estacao) {
+    meta.textContent = state.estacoes.length ? `Estação · ${state.estacoes.length} disponíveis` : 'Estação';
+    name.textContent = 'Todas as estações';
+  } else {
+    const p = splitStation(state.estacao);
+    meta.textContent = p.meta;
+    name.textContent = p.name;
+  }
+}
+
+function normalize(s) { return String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase(); }
+
+function renderStationList() {
+  const q = normalize(document.getElementById('stationSearch').value.trim());
+  const items = [{ value: '', name: 'Todas as estações', meta: 'Visão consolidada' }]
+    .concat(state.estacoes.map(v => ({ value: v, ...splitStation(v) })))
+    .filter(i => !q || normalize(`${i.name} ${i.meta} ${i.value}`).includes(q));
+  const list = document.getElementById('stationList');
+  list.innerHTML = items.length
+    ? items.map(i => `
+      <button type="button" role="option" class="station-opt${i.value === state.estacao ? ' active' : ''}" data-value="${escapeHtml(i.value)}" onclick="selectStation(this.dataset.value)">
+        <span class="so-name">${escapeHtml(i.name)}</span>
+        <span class="so-meta">${escapeHtml(i.meta)}</span>
+      </button>`).join('')
+    : '<p class="panel-empty">Nenhuma estação encontrada.</p>';
+}
+
+function toggleStation() {
+  const el = document.getElementById('station');
+  const isOpen = el.classList.contains('open');
+  closePanels();
+  if (!isOpen) {
+    el.classList.add('open');
+    const search = document.getElementById('stationSearch');
+    search.value = '';
+    renderStationList();
+    search.focus();
+  }
+}
+
+function stationSearchKey(e) {
+  if (e.key !== 'Enter') return;
+  const first = document.querySelector('#stationList .station-opt');
+  if (first) selectStation(first.dataset.value);
+}
+
+function selectStation(value) {
+  closePanels();
+  if (value === state.estacao && !firstLoad) return;
+  state.estacao = value;
+  storeSet('pot-estacao', value);
+  updateStationLabel();
+  renderStationList();
+  loadPacked(false);
 }
 
 // ---------- Multi-select (Turno / Zona / Hub) ----------
 
+// O painel só é reconstruído quando as opções mudam — assim uma recarga não
+// apaga a busca que o usuário está digitando nem fecha a lista.
 function fillMs(key, values) {
-  msOptionsCache[key] = values;
   msState[key] = msState[key].filter(v => values.includes(v));
-  const panel = document.getElementById('ms' + key + 'Panel');
-  const allLabel = key === 'Zona' ? 'Todas' : 'Todos';
-  panel.innerHTML = `
-    <label class="ms-option all">
-      <input type="checkbox" data-ms="${key}" data-all onchange="msToggleAll('${key}')">
-      ${allLabel}
-    </label>
-    ${values.map(v => `
-      <label class="ms-option">
-        <input type="checkbox" data-ms="${key}" value="${escapeHtml(v)}" onchange="msToggleValue('${key}','${escapeHtml(v)}')">
-        ${escapeHtml(v)}
+  const signature = values.join('\u0001');
+  if (msOptionsCache[key] !== signature) {
+    msOptionsCache[key] = signature;
+    const panel = document.getElementById('ms' + key + 'Panel');
+    const allLabel = key === 'Zona' ? 'Todas' : 'Todos';
+    panel.innerHTML = `
+      ${values.length > 6 ? `<input type="search" class="panel-search" placeholder="Buscar ${key.toLowerCase()}..." oninput="msFilter('${key}', this.value)">` : ''}
+      <label class="ms-option all">
+        <input type="checkbox" data-ms="${key}" data-all onchange="msToggleAll('${key}')">
+        ${allLabel} <span class="ms-count">${values.length}</span>
       </label>
-    `).join('')}
-  `;
+      <div class="ms-list">
+        ${values.map(v => `
+          <label class="ms-option" data-search="${escapeHtml(normalize(v))}">
+            <input type="checkbox" data-ms="${key}" value="${escapeHtml(v)}" onchange="msToggleValue('${key}', this.value)">
+            <span>${escapeHtml(v)}</span>
+          </label>
+        `).join('')}
+        <p class="panel-empty" hidden>Nada encontrado.</p>
+      </div>
+    `;
+  }
   msSyncChecks(key);
   msUpdateLabel(key);
+}
+
+function msFilter(key, query) {
+  const q = normalize(query.trim());
+  const panel = document.getElementById('ms' + key + 'Panel');
+  let visible = 0;
+  panel.querySelectorAll('.ms-list .ms-option').forEach(opt => {
+    const show = !q || opt.dataset.search.includes(q);
+    opt.hidden = !show;
+    if (show) visible++;
+  });
+  panel.querySelector('.ms-list .panel-empty').hidden = visible > 0;
 }
 
 function msSyncChecks(key) {
@@ -106,52 +276,134 @@ function msUpdateLabel(key) {
   if (!selected.length) btn.textContent = allLabel;
   else if (selected.length === 1) btn.textContent = selected[0];
   else btn.textContent = `${selected.length} selecionados`;
+  btn.classList.toggle('active', selected.length > 0);
+}
+
+function msChanged(key) {
+  msSyncChecks(key);
+  msUpdateLabel(key);
+  renderChips();
+  scheduleLoad();
 }
 
 function msToggleValue(key, value) {
   const idx = msState[key].indexOf(value);
   if (idx >= 0) msState[key].splice(idx, 1); else msState[key].push(value);
-  msSyncChecks(key);
-  msUpdateLabel(key);
-  loadPacked(false);
+  msChanged(key);
 }
 
 function msToggleAll(key) {
   msState[key] = [];
-  msSyncChecks(key);
-  msUpdateLabel(key);
-  loadPacked(false);
+  msChanged(key);
+}
+
+function closePanels() {
+  document.querySelectorAll('.ms.open, .station.open').forEach(o => o.classList.remove('open'));
 }
 
 function toggleMs(id) {
   const el = document.getElementById(id);
   const isOpen = el.classList.contains('open');
-  document.querySelectorAll('.ms.open').forEach(o => o.classList.remove('open'));
-  if (!isOpen) el.classList.add('open');
+  closePanels();
+  if (!isOpen) {
+    el.classList.add('open');
+    const search = el.querySelector('.panel-search');
+    if (search) search.focus();
+  }
 }
 
 document.addEventListener('click', e => {
-  document.querySelectorAll('.ms.open').forEach(el => {
+  document.querySelectorAll('.ms.open, .station.open').forEach(el => {
     if (!el.contains(e.target)) el.classList.remove('open');
   });
 });
 
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanels(); });
+
+// ---------- Período ----------
+
 function updateDateBounds(bounds) {
+  state.dateBounds = bounds;
   const ini = document.getElementById('filterDataIni');
   const fim = document.getElementById('filterDataFim');
-  if (!bounds) { ini.removeAttribute('min'); ini.removeAttribute('max'); fim.removeAttribute('min'); fim.removeAttribute('max'); return; }
-  ini.min = fim.min = bounds.min;
-  ini.max = fim.max = bounds.max;
+  if (!bounds) { ini.removeAttribute('min'); ini.removeAttribute('max'); fim.removeAttribute('min'); fim.removeAttribute('max'); }
+  else {
+    ini.min = fim.min = bounds.min;
+    ini.max = fim.max = bounds.max;
+  }
+  syncPresets();
+}
+
+function shiftDate(iso, days) {
+  const d = new Date(iso + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+// Presets contam a partir do último dia com dado na base (não de "hoje"), porque a
+// planilha pode estar um dia atrás.
+function presetRange(days) {
+  const b = state.dateBounds;
+  if (!days || !b) return { from: '', to: '' };
+  const from = shiftDate(b.max, -(days - 1));
+  return { from: from < b.min ? b.min : from, to: b.max };
+}
+
+function applyPreset(days) {
+  const r = presetRange(days);
+  document.getElementById('filterDataIni').value = r.from;
+  document.getElementById('filterDataFim').value = r.to;
+  onDateChange();
+}
+
+function onDateChange() {
+  syncPresets();
+  renderChips();
+  scheduleLoad();
+}
+
+function syncPresets() {
+  const from = document.getElementById('filterDataIni').value;
+  const to = document.getElementById('filterDataFim').value;
+  document.querySelectorAll('#datePresets button').forEach(btn => {
+    const r = presetRange(+btn.dataset.preset);
+    const isAll = +btn.dataset.preset === 0;
+    btn.classList.toggle('active', isAll ? (!from && !to) : (r.from === from && r.to === to));
+  });
+}
+
+// ---------- Filtros ativos ----------
+
+function renderChips() {
+  const chips = [];
+  const from = document.getElementById('filterDataIni').value;
+  const to = document.getElementById('filterDataFim').value;
+  if (from || to) {
+    const label = from && to && from === to ? fmtDate(from) : `${from ? fmtDate(from) : 'início'} – ${to ? fmtDate(to) : 'fim'}`;
+    chips.push(`<button type="button" class="chip" onclick="applyPreset(0)"><span class="chip-k">Período</span>${label}<span class="chip-x">✕</span></button>`);
+  }
+  MS_KEYS.forEach(key => {
+    const sel = msState[key];
+    if (sel.length > 3) {
+      chips.push(`<button type="button" class="chip" onclick="msToggleAll('${key}')"><span class="chip-k">${key}</span>${sel.length} selecionados<span class="chip-x">✕</span></button>`);
+    } else {
+      sel.forEach(v => chips.push(`<button type="button" class="chip" data-value="${escapeHtml(v)}" onclick="msToggleValue('${key}', this.dataset.value)"><span class="chip-k">${key}</span>${escapeHtml(v)}<span class="chip-x">✕</span></button>`));
+    }
+  });
+  document.getElementById('activeChips').innerHTML = chips.join('');
+  document.getElementById('btnClear').disabled = !chips.length;
 }
 
 function clearFilters() {
   document.getElementById('filterDataIni').value = '';
   document.getElementById('filterDataFim').value = '';
-  ['Turno', 'Zona', 'Hub'].forEach(key => {
+  MS_KEYS.forEach(key => {
     msState[key] = [];
     msSyncChecks(key);
     msUpdateLabel(key);
   });
+  syncPresets();
+  renderChips();
   loadPacked(false);
 }
 
@@ -170,6 +422,7 @@ function fmtH(h) {
   if (abs < 24) return h.toFixed(1) + 'h';
   return (h / 24).toFixed(1) + 'd';
 }
+function fmtDate(iso) { return iso.split('-').reverse().join('/'); }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 // ---------- Render ----------
@@ -177,10 +430,10 @@ function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp
 function renderAll(s) {
   renderKPIs(s);
   renderInsights(s);
+  renderEstacaoSection(s);
   renderTrendChart(s);
   renderTurnoCharts(s);
-  renderRankList('rankHub', s ? s.porHub : [], 'hub');
-  renderRankList('rankZona', s ? s.porZona : [], 'zona');
+  renderRanks(s);
 }
 
 function renderKPIs(s) {
@@ -208,6 +461,13 @@ function renderInsights(s) {
   const overall = s.avgAtrasoMin;
 
   items.push(`<strong>${s.total.toLocaleString('pt-BR')}</strong> pacotes no período, com atraso médio geral de <strong>${fmtMin(overall)}</strong> e lead time médio de <strong>${fmtH(s.avgLeadTimeH)}</strong>.`);
+
+  const estacoesComMedia = (s.porEstacao || []).filter(e => e.avgAtrasoMin !== null);
+  if (!state.estacao && estacoesComMedia.length > 1) {
+    const pior = estacoesComMedia[0];
+    const delta = fmtDelta(pior.avgAtrasoMin, overall);
+    items.push(`Entre as estações, <strong>${escapeHtml(splitStation(pior.estacao).name)}</strong> tem o maior atraso médio: <strong>${fmtMin(pior.avgAtrasoMin)}</strong>${delta ? ` (<strong>${delta}</strong>)` : ''}, com ${pior.shipments.toLocaleString('pt-BR')} pacotes.`);
+  }
 
   const zonasComMedia = (s.porZona || []).filter(z => z.avgAtrasoMin !== null);
   const topZonas = zonasComMedia.slice(0, 3);
@@ -247,8 +507,7 @@ function renderInsights(s) {
   if (s.porDia && s.porDia.length > 1) {
     const piorDia = s.porDia.filter(d => d.avgAtrasoMin !== null).reduce((max, d) => (!max || d.avgAtrasoMin > max.avgAtrasoMin ? d : max), null);
     if (piorDia) {
-      const dataFmt = piorDia.data.split('-').reverse().join('/');
-      items.push(`O pior dia do período foi <strong>${dataFmt}</strong>, com atraso médio de <strong>${fmtMin(piorDia.avgAtrasoMin)}</strong>.`);
+      items.push(`O pior dia do período foi <strong>${fmtDate(piorDia.data)}</strong>, com atraso médio de <strong>${fmtMin(piorDia.avgAtrasoMin)}</strong>.`);
     }
   }
 
@@ -349,24 +608,81 @@ function renderTurnoCharts(s) {
   });
 }
 
-function renderRankList(containerId, ranked, keyName) {
+// Comparativo só aparece na visão consolidada; cada linha abre a estação.
+function renderEstacaoSection(s) {
+  const section = document.getElementById('estacaoSection');
+  const rows = s ? s.porEstacao || [] : [];
+  section.hidden = !!state.estacao || rows.length < 2;
+  if (section.hidden) return;
+  renderRankList('rankEstacao', rows, {
+    label: r => splitStation(r.estacao).name,
+    sub: r => splitStation(r.estacao).meta,
+    onClick: r => r.estacao,
+    total: s.total,
+    overall: s.avgAtrasoMin
+  });
+}
+
+function renderRanks(s) {
+  ['zona', 'hub'].forEach(key => {
+    document.querySelectorAll(`.seg[data-rank="${key}"] button`).forEach(b => b.classList.toggle('active', b.dataset.sort === rankSort[key]));
+    const ranked = s ? (key === 'zona' ? s.porZona : s.porHub) : [];
+    const sorted = rankSort[key] === 'volume' ? ranked.slice().sort((a, b) => b.shipments - a.shipments) : ranked;
+    renderRankList(key === 'zona' ? 'rankZona' : 'rankHub', sorted, {
+      label: r => r[key],
+      sortBy: rankSort[key],
+      total: s ? s.total : 0,
+      overall: s ? s.avgAtrasoMin : null,
+      limit: rankExpanded[key] ? Infinity : RANK_LIMIT,
+      expandKey: key
+    });
+  });
+}
+
+function setRankSort(key, sort) {
+  rankSort[key] = sort;
+  if (stats) renderRanks(stats);
+}
+
+function toggleRankExpand(key) {
+  rankExpanded[key] = !rankExpanded[key];
+  if (stats) renderRanks(stats);
+}
+
+// Linhas acima da média geral ganham o valor de atraso em destaque — dá pra bater
+// o olho no ranking e ver onde está o problema sem ler número por número.
+function renderRankList(containerId, ranked, opts) {
   const container = document.getElementById(containerId);
   if (!ranked || !ranked.length) {
-    container.innerHTML = '<p style="color:var(--text-muted);font-size:12px;padding:16px 20px">Sem dados para os filtros selecionados.</p>';
+    container.innerHTML = '<p class="rank-empty">Sem dados para os filtros selecionados.</p>';
     return;
   }
-  const top = ranked.slice(0, 12);
-  const maxAtraso = Math.max(...top.map(r => r.avgAtrasoMin || 0), 1);
-  container.innerHTML = top.map(r => `
-    <div class="rank-row">
-      <div>
-        <div class="rn">${escapeHtml(r[keyName])}</div>
-        <div class="rbar"><span style="width:${((r.avgAtrasoMin || 0) / maxAtraso) * 100}%"></span></div>
+  const limit = opts.limit || Infinity;
+  const top = ranked.slice(0, limit);
+  const metric = r => (opts.sortBy === 'volume' ? r.shipments : r.avgAtrasoMin || 0);
+  const maxMetric = Math.max(...top.map(metric), 1);
+  const rowsHtml = top.map((r, i) => {
+    const above = opts.overall && r.avgAtrasoMin > opts.overall;
+    const pct = opts.total ? (r.shipments / opts.total) * 100 : 0;
+    const tag = opts.onClick ? 'button' : 'div';
+    const click = opts.onClick ? ` type="button" data-value="${escapeHtml(opts.onClick(r))}" onclick="selectStation(this.dataset.value)"` : '';
+    return `
+    <${tag} class="rank-row${opts.onClick ? ' clickable' : ''}"${click}>
+      <div class="rpos">${i + 1}</div>
+      <div class="rmain">
+        <div class="rn" title="${escapeHtml(opts.label(r))}">${escapeHtml(opts.label(r))}${opts.sub ? `<span class="rsub">${escapeHtml(opts.sub(r))}</span>` : ''}</div>
+        <div class="rbar"><span style="width:${(metric(r) / maxMetric) * 100}%"></span></div>
       </div>
-      <div class="rv">${fmtMin(r.avgAtrasoMin)}</div>
-      <div class="rv">${r.shipments.toLocaleString('pt-BR')} pcts</div>
-    </div>
-  `).join('');
+      <div class="rv${above ? ' hot' : ''}">${fmtMin(r.avgAtrasoMin)}</div>
+      <div class="rv">${r.shipments.toLocaleString('pt-BR')}<span class="rpct">${pct.toFixed(1)}%</span></div>
+    </${tag}>`;
+  }).join('');
+  const more = opts.expandKey && ranked.length > RANK_LIMIT
+    ? `<button type="button" class="rank-more" onclick="toggleRankExpand('${opts.expandKey}')">${rankExpanded[opts.expandKey] ? 'Mostrar menos' : `Ver todos (${ranked.length})`}</button>`
+    : '';
+  container.innerHTML = `
+    <div class="rank-row rank-head"><div></div><div>Nome</div><div class="rv">Atraso</div><div class="rv">Pacotes · %</div></div>
+    ${rowsHtml}${more}`;
 }
 
 function setStatus(type, msg) {
@@ -384,5 +700,8 @@ function hideLoader() { document.getElementById('loader').classList.remove('acti
 
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('themeToggle').textContent = currentTheme() === 'dark' ? '☀ Claro' : '☾ Escuro';
+  restoreFromUrl();
+  updateStationLabel();
+  renderChips();
   loadPacked(false);
 });
