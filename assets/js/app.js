@@ -470,8 +470,7 @@ function renderInsights(s) {
   const overall = s.avgAtrasoMin;
 
   if (pot && !pot.error && pot.pct !== null) {
-    const fora = pot.outTime + pot.cptNa;
-    items.push(`<strong>% POT de ${fmtPct(pot.pct)}</strong>: os pedidos fora do prazo equivalem a <strong>${fmtPct(1 - pot.pct)}</strong> do On time (${fmtInt(fora)} pedidos — ${fmtInt(pot.outTime)} Out time e ${fmtInt(pot.cptNa)} sem CPT).`);
+    items.push(`<strong>% POT de ${fmtPct(pot.pct)}</strong>: os ${fmtInt(pot.outTime)} pedidos Out time equivalem a <strong>${fmtPct(1 - pot.pct)}</strong> do On time. Outros ${fmtInt(pot.cptNa)} estão sem CPT e ficam fora da conta.`);
     const potEst = (pot.porEstacao || []).filter(e => e.pct !== null);
     if (!state.estacao && potEst.length > 1) {
       items.push(`Pior % POT entre as estações: <strong>${escapeHtml(splitStation(potEst[0].estacao).name)}</strong> com <strong>${fmtPct(potEst[0].pct)}</strong>.`);
@@ -595,7 +594,7 @@ function renderPot(p) {
   const share = v => (ok && p.total ? `${fmtPct(v / p.total)} do total` : '');
   document.getElementById('kpiPotOnSub').textContent = share(ok ? p.onTime : 0) || 'Pedidos no prazo';
   document.getElementById('kpiPotOutSub').textContent = share(ok ? p.outTime : 0) || 'Pedidos fora do prazo';
-  document.getElementById('kpiPotCptSub').textContent = share(ok ? p.cptNa : 0) || 'Sem CPT planejado';
+  document.getElementById('kpiPotCptSub').textContent = (share(ok ? p.cptNa : 0) || 'Sem CPT planejado') + ' · fora do cálculo do %';
 
   const dias = ok ? p.porDia : [];
   const range = dias.length ? (dias.length === 1 ? fmtDate(dias[0].periodo) : `${fmtDate(dias[0].periodo)} a ${fmtDate(dias[dias.length - 1].periodo)}`) : '';

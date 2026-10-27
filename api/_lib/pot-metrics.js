@@ -2,11 +2,11 @@
 // estação × status OOT (On time / Out time / CPT not available). Daqui sai o
 // % POT do painel:
 //
-//   % POT = (On time - (CPT not available + Out time)) / On time
+//   % POT = (On time - Out time) / On time
 //
-// ou seja, 100% menos a proporção de pedidos fora do prazo para cada pedido no
-// prazo — quanto maior, melhor. Linhas sem outbound_day são ignoradas (não dá pra
-// encaixá-las em nenhum período).
+// ou seja, 100% menos a proporção de Out time para cada pedido no prazo — quanto
+// maior, melhor. CPT not available fica fora da conta (só é exibido à parte).
+// Linhas sem outbound_day são ignoradas (não dá pra encaixá-las em nenhum período).
 
 const STATUS_KEY = { 'On time': 'onTime', 'Out time': 'outTime', 'CPT not available': 'cptNa' };
 
@@ -16,7 +16,7 @@ function toNum(value) {
   return Number.isNaN(n) ? 0 : n;
 }
 
-function potPct(b) { return b.onTime ? (b.onTime - (b.cptNa + b.outTime)) / b.onTime : null; }
+function potPct(b) { return b.onTime ? (b.onTime - b.outTime) / b.onTime : null; }
 
 function newBucket() { return { onTime: 0, outTime: 0, cptNa: 0 }; }
 
